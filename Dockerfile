@@ -1,29 +1,58 @@
-# Usamos una imagen ligera de Node 18
-FROM node:18-slim
+# Usamos Node 18 completo (no slim) que ya trae herramientas útiles
+FROM node:18
 
-# 1. Instalar dependencias de Linux necesarias para correr Chrome/Puppeteer
-# Esto es obligatorio en Railway, si no el robot dará error al intentar abrir el navegador
-RUN apt-get update \
-    && apt-get install -y wget gnupg \
-    && wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | apt-key add - \
-    && sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' \
-    && apt-get update \
-    && apt-get install -y google-chrome-stable fonts-ipafont-gothic fonts-wqy-zenhei fonts-thai-tlwg fonts-kacst fonts-freefont-ttf libxss1 \
-      --no-install-recommends \
+# Instalar SOLO las librerías necesarias para correr Puppeteer
+# Esto es mucho más rápido que bajar Google Chrome Stable
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    fonts-liberation \
+    libasound2 \
+    libatk-bridge2.0-0 \
+    libatk1.0-0 \
+    libc6 \
+    libcairo2 \
+    libcups2 \
+    libdbus-1-3 \
+    libexpat1 \
+    libfontconfig1 \
+    libgbm1 \
+    libgcc1 \
+    libglib2.0-0 \
+    libgtk-3-0 \
+    libnspr4 \
+    libnss3 \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libstdc++6 \
+    libx11-6 \
+    libx11-xcb1 \
+    libxcb1 \
+    libxcomposite1 \
+    libxcursor1 \
+    libxdamage1 \
+    libxext6 \
+    libxfixes3 \
+    libxi6 \
+    libxrandr2 \
+    libxrender1 \
+    libxss1 \
+    libxtst6 \
+    lsb-release \
+    wget \
+    xdg-utils \
     && rm -rf /var/lib/apt/lists/*
 
-# 2. Configurar directorio de trabajo
 WORKDIR /app
 
-# 3. Copiar archivos de dependencias e instalar
+# Copiamos package.json primero para aprovechar la caché de Docker
 COPY package*.json ./
+
+# Aquí Puppeteer descargará su propia versión optimizada de Chromium
 RUN npm install
 
-# 4. Copiar el resto del código (tu index.js)
+# Copiamos el resto del código
 COPY . .
 
-# 5. Exponer el puerto (Railway usa su propia variable, pero esto es buena práctica)
 EXPOSE 3000
 
-# 6. Comando de arranque
 CMD ["node", "index.js"]
