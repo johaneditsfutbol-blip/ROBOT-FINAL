@@ -1,0 +1,1086 @@
+const express = require('express');
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const https = require('https');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.use(express.json());
+
+// ==============================================================================
+// 1. CONFIGURACIONES GLOBALES
+// ==============================================================================
+
+const CONFIG_ICARO = {
+    urlLogin: "https://administrativo.icarosoft.com/",
+    urlLista: "https://administrativo.icarosoft.com/Listado_clientes_tickets/",
+    user: "JOHANC",
+    pass: "@VNjohanc16",
+    selUser: '#id_sc_field_login',
+    selPass: '#id_sc_field_pswd',
+};
+
+const CONFIG_VIDANET = { 
+    url: "https://pagos.vidanet.net" 
+};
+
+const BUILDERBOT = {
+    url: 'https://app.builderbot.cloud/api/v2/80c70b51-1737-4dad-9ee9-111cbc75174e/messages',
+    token: 'bb-3441000d-f490-47bf-9c5a-273409fad976'
+};
+
+const PUSH_CONFIG = {
+    supabaseUrl: "https://qyvmupeeldyggghegnke.supabase.co/rest/v1/push_tokens",
+    supabaseKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF5dm11cGVlbGR5Z2dnaGVnbmtlIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIxNzc1ODMsImV4cCI6MjA3Nzc1MzU4M30.srvwDtXyKvi9_CyuFfiJkrkX_kZz6lXEaqBW3F3A5Jo", 
+    expoUrl: "https://exp.host/--/api/v2/push/send"
+};
+
+const esperar = (ms) => new Promise(r => setTimeout(r, ms));
+
+// --- GESTIÓN DE NAVEGADORES INDEPENDIENTES ---
+let browserRegistrador = null; // Para /pagar (Icaro)
+let pageRegistrador = null;
+
+let browserVidanet = null;     // Para /pagar-vidanet y /consultar
+let pageVidanetDummy = null;
+
+let browserServicios = null;   // Para /buscar-servicios (Robot V30)
+let pageServicios = null;
+
+let browserFinanzas = null;    // Para /buscar-finanzas (Robot V18)
+let pageFinanzas = null;
+
+
+// ==============================================================================
+// 2. HERRAMIENTAS COMUNES (Notificaciones & Helpers Básicos)
+// ==============================================================================
+
+function notificarBuilderBot(datos) {
+    return new Promise((resolve, reject) => {
+        console.log("   🔔 [BOT] Enviando notificación...");
+        const numero = datos.numero || datos; 
+        if (!numero) { resolve(null); return; }
+
+        const mensajeTexto = datos.mensaje || (typeof datos === 'string' ? datos : "Proceso finalizado.");
+        const mensajeObj = { "content": mensajeTexto };
+        if (datos.mediaUrl && datos.mediaUrl.startsWith('http')) mensajeObj.mediaUrl = datos.mediaUrl;
+
+        const payload = JSON.stringify({
+            "number": String(numero).replace(/\D/g, ''),
+            "messages": mensajeObj, 
+            "checkIfExists": false
+        });
+
+        const urlParts = new URL(BUILDERBOT.url);
+        const req = https.request({
+            hostname: urlParts.hostname,
+            path: urlParts.pathname,
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'x-api-builderbot': BUILDERBOT.token,
+                'Content-Length': Buffer.byteLength(payload)
+            }
+        }, (res) => {
+            let data = '';
+            res.on('data', c => data += c);
+            res.on('end', () => resolve(data));
+        });
+        req.on('error', (e) => resolve(null));
+        req.write(payload);
+        req.end();
+    });
+}
+
+async function gestionarNotificacionPush(idCliente, datos, esExito, mensajeDetalle) {
+    try {
+        console.log(`   📱 [PUSH] Procesando para: ${idCliente}`);
+        const urlGet = `${PUSH_CONFIG.supabaseUrl}?codigo_cliente=ilike.*${idCliente}*&select=expo_push_token`;
+        const respSupabase = await fetch(urlGet, {
+            method: 'GET',
+            headers: {
+                'apikey': PUSH_CONFIG.supabaseKey,
+                'Authorization': `Bearer ${PUSH_CONFIG.supabaseKey}`,
+                'Content-Type': 'application/json'
+            }
+        });
+        if (!respSupabase.ok) return;
+        const dataSupabase = await respSupabase.json();
+        if (!dataSupabase || !dataSupabase.length || !dataSupabase[0].expo_push_token) return;
+
+        const pushToken = dataSupabase[0].expo_push_token;
+        let titulo = esExito ? "✅ PAGO CONFIRMADO" : "❌ PAGO NO PROCESADO";
+        let cuerpo = esExito 
+            ? `\n🆔 REF: #${datos.referencia}\n📅 FECHA: ${datos.fecha || new Date().toLocaleDateString()}\n💵 MONTO: ${datos.monto || "N/A"}\n\n🚀 Tu servicio será reactivado automáticamente.`
+            : `\n🆔 REF: #${datos.referencia}\n⚠️ MOTIVO: ${mensajeDetalle}\n\nVerifica tu comprobante e intenta nuevamente.`;
+
+        await fetch(PUSH_CONFIG.expoUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                to: pushToken,
+                title: titulo,
+                body: cuerpo,
+                priority: "high",
+                sound: "default",
+                badge: 1,
+                data: { referencia: datos.referencia, estado: esExito ? 'success' : 'fail' }
+            })
+        });
+    } catch (e) { console.error("   ❌ [PUSH] Error:", e.message); }
+}
+
+function descargarImagenTemporal(url) {
+    return new Promise((resolve, reject) => {
+        const nombreTemp = `temp_${Date.now()}.jpg`;
+        const rutaTemp = path.resolve(__dirname, nombreTemp);
+        const file = fs.createWriteStream(rutaTemp);
+        https.get(url, (res) => {
+            if (res.statusCode !== 200) { reject(new Error(`Status: ${res.statusCode}`)); return; }
+            res.pipe(file);
+            file.on('finish', () => file.close(() => resolve(rutaTemp)));
+        }).on('error', (err) => { fs.unlink(rutaTemp, () => {}); reject(err); });
+    });
+}
+
+async function subirComprobante(frame, rutaOUrl) {
+    let rutaFinal = rutaOUrl;
+    let esTemporal = false;
+    if (rutaOUrl.startsWith('http')) {
+        try { rutaFinal = await descargarImagenTemporal(rutaOUrl); esTemporal = true; } 
+        catch (e) { console.log(`            ❌ Error descarga img: ${e.message}`); return false; }
+    } else if (!fs.existsSync(rutaFinal)) return false;
+
+    const input = await frame.$('input[type="file"]');
+    if (input) {
+        await input.uploadFile(rutaFinal);
+        await frame.evaluate(() => {
+            const el = document.querySelector('input[type="file"]');
+            if (el) el.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+        await esperar(5000);
+        if (esTemporal) try { fs.unlinkSync(rutaFinal); } catch(e){}
+        return true;
+    }
+    return false;
+}
+
+// Helpers de Interacción Icaro
+async function clickPorTexto(frame, texto) {
+    return await frame.evaluate((txt) => {
+        const xpath = `//a[contains(., '${txt}')] | //span[contains(., '${txt}')] | //button[contains(., '${txt}')] | //div[contains(text(), '${txt}')]`;
+        const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+        const el = result.singleNodeValue;
+        if (el) { el.scrollIntoView(); el.click(); return true; }
+        return false;
+    }, texto);
+}
+
+async function seleccionarLetra(page, letra) {
+    return await page.evaluate((txt) => {
+        const selects = Array.from(document.querySelectorAll('select'));
+        const targetSelect = selects.find(sel => Array.from(sel.options).some(opt => opt.text.includes(txt)));
+        if (targetSelect) {
+            const option = Array.from(targetSelect.options).find(opt => opt.text.includes(txt));
+            targetSelect.value = option.value;
+            targetSelect.dispatchEvent(new Event('change', { bubbles: true }));
+            return true;
+        }
+        return false;
+    }, letra);
+}
+
+// ==============================================================================
+// 3. MÓDULO ROBOT 1: REGISTRADOR DE PAGOS (ICARO + VIDANET)
+// ==============================================================================
+
+// --- HELPERS VIDANET (Restaurados Originales) ---
+async function clickGeometrico(page, texto) {
+    console.log(`      -> 📐 Buscando barra ancha: "${texto}"...`);
+    const elemento = await page.evaluateHandle((txt) => {
+        const norm = (s) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+        const target = norm(txt);
+        const all = Array.from(document.querySelectorAll('button, a, div, span'));
+        const matches = all.filter(el => norm(el.innerText).includes(target) && el.offsetParent !== null);
+        if (matches.length > 0) {
+            matches.sort((a, b) => a.innerText.length - b.innerText.length);
+            const ganador = matches[0];
+            ganador.scrollIntoView({block: "center"});
+            return ganador;
+        }
+        return null;
+    }, texto);
+
+    if (!elemento.asElement()) return false;
+    const box = await elemento.boundingBox();
+    if (!box) return false;
+
+    let clickX = box.x + box.width / 2;
+    if (box.width > 300) clickX = box.x + box.width - 80; 
+    const clickY = box.y + box.height / 2;
+
+    await page.mouse.click(clickX, clickY);
+    return true;
+}
+
+async function clickCentroPuro(page, texto) {
+    console.log(`      -> 🎯 Buscando botón normal: "${texto}"...`);
+    const elemento = await page.evaluateHandle((txt) => {
+        const norm = (s) => s ? s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+        const target = norm(txt);
+        const all = Array.from(document.querySelectorAll('button, a, div, span, strong')); 
+        const matches = all.filter(el => norm(el.innerText).includes(target) && el.offsetParent !== null);
+        if (matches.length > 0) {
+            matches.sort((a, b) => a.innerText.length - b.innerText.length);
+            const ganador = matches[0];
+            ganador.scrollIntoView({block: "center"});
+            return ganador;
+        }
+        return null;
+    }, texto);
+
+    if (!elemento.asElement()) return false;
+    const box = await elemento.boundingBox();
+    if (!box) return false;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    return true;
+}
+
+async function clickBotonValidar(page) {
+    console.log(`      -> 🛡️ Buscando EXCLUSIVAMENTE botón Validar...`);
+    const elemento = await page.evaluateHandle(() => {
+        const all = Array.from(document.querySelectorAll('button, div, span, a'));
+        const matches = all.filter(el => {
+            const texto = el.innerText ? el.innerText.toLowerCase() : "";
+            const tieneInput = el.querySelector('input'); 
+            const esVisible = el.offsetParent !== null;
+            return texto.includes("validar") && !tieneInput && esVisible;
+        });
+        if (matches.length > 0) {
+            matches.sort((a, b) => a.innerText.length - b.innerText.length);
+            const ganador = matches[0];
+            ganador.scrollIntoView({block: "center"});
+            return ganador;
+        }
+        return null;
+    });
+
+    if (!elemento.asElement()) return false;
+    const box = await elemento.boundingBox();
+    if (!box) return false;
+    await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+    return true;
+}
+
+async function manipularDeudas(page, modo, idsObjetivo = []) {
+    // Selectores CSS Blindados
+    const cssBadge = "span.bg-green-500"; 
+    const cssDeudaTexto = "div.font-bold.text-gray-900"; 
+    const cssPrecio = "div.text-2xl.text-green-700"; 
+
+    console.log(`      ⚙️ Modo Deudas: ${modo}`); // <--- LOG RESTAURADO
+
+    const limpiarSeleccion = async () => {
+        console.log("      🧹 Limpiando selección inicial..."); // <--- LOG RESTAURADO
+        const badges = await page.$$(cssBadge);
+        for (const badge of badges) {
+            try {
+                const txt = await page.evaluate(e => e.innerText, badge);
+                if (txt.includes("Seleccionada")) { 
+                    await badge.click(); 
+                    await esperar(300); 
+                }
+            } catch(e){}
+        }
+        await esperar(1000);
+    };
+
+    const candidatos = await page.$$(cssDeudaTexto);
+    const elsDeuda = [];
+    for(const el of candidatos) {
+        if((await page.evaluate(e=>e.innerText, el)).includes("Deuda #")) elsDeuda.push(el);
+    }
+    
+    if(elsDeuda.length === 0) return [];
+
+    // --- MODO SCAN (GET) ---
+    if(modo === 'SCAN') {
+        await limpiarSeleccion();
+        let res = [];
+        for(const el of elsDeuda) {
+            const id = await page.evaluate(e=>e.innerText.trim(), el);
+            
+            // Log opcional si quieres ver el escaneo paso a paso
+            // console.log(`      🔍 Escaneando: ${id}`); 
+            
+            await el.click(); await esperar(800);
+            const pEl = await page.$(cssPrecio);
+            let m = pEl ? await page.evaluate(e=>e.innerText.trim(), pEl) : "0.00";
+            res.push({ id_deuda: id, monto: m });
+            await el.click(); await esperar(300);
+        }
+        return res;
+    }
+
+    // --- MODO SELECT (POST) ---
+    if(modo === 'SELECT') {
+        if(!idsObjetivo || idsObjetivo==="todas" || idsObjetivo.length===0) {
+            console.log("      ✅ Pagando TODAS (Selección por defecto)."); // <--- LOG RESTAURADO
+            return true;
+        }
+
+        await limpiarSeleccion();
+        
+        let c = 0;
+        for(const el of elsDeuda) {
+            const id = await page.evaluate(e=>e.innerText.trim(), el);
+            if(idsObjetivo.includes(id)) { 
+                console.log(`      🎯 Seleccionando: ${id}`); // <--- LOG RESTAURADO
+                await el.click(); 
+                c++; 
+                await esperar(500); 
+            }
+        }
+        
+        if(c===0) throw new Error("Deudas no encontradas.");
+        return true;
+    }
+}
+
+// --- LOGICA DE REGISTRO ---
+
+async function iniciarRegistrador() {
+    console.log("🚀 [REGISTRADOR] Iniciando Icaro...");
+    browserRegistrador = await puppeteer.launch({ 
+        headless: "new", 
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--start-maximized'] 
+    });
+    pageRegistrador = await browserRegistrador.newPage();
+    await pageRegistrador.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2' });
+    
+    if (await pageRegistrador.$(CONFIG_ICARO.selUser)) {
+        await pageRegistrador.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
+        await pageRegistrador.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
+        await pageRegistrador.evaluate(() => {
+            const spans = document.querySelectorAll('span');
+            for (const span of spans) if (span.innerText.includes('Login')) { span.click(); return; }
+        });
+        await pageRegistrador.waitForNavigation({ waitUntil: 'networkidle2' });
+        console.log("✅ [REGISTRADOR] Icaro Login OK.");
+    }
+}
+
+async function registrarPagoWizard(idCliente, datos) {
+    if (!browserRegistrador) { console.error("❌ Registrador no listo."); return; }
+    console.log(`\n🤖 --- [ICARO] PAGO ID: ${idCliente} ---`);
+    
+    const page = await browserRegistrador.newPage();
+    page.on('dialog', async d => {
+        console.log(`      👀 ALERTA: "${d.message()}" -> ACEPTADA.`);
+        await d.accept(); 
+    });
+
+    try {
+        await page.goto(CONFIG_ICARO.urlLista, { waitUntil: 'networkidle2' });
+        if (await page.$('#SC_fast_search_top')) {
+            await page.type('#SC_fast_search_top', idCliente);
+            await page.click('#SC_fast_search_submit_top');
+            await esperar(3000); 
+        }
+
+        console.log("   🟢 Click 'Registrar pago'...");
+        const frames = page.frames();
+        let btnEncontrado = false;
+        for (const f of frames) {
+            const btn = await f.$('a[id*="registrar_pagos"], span[id*="registrar_pagos"]');
+            if (btn) { await btn.click(); btnEncontrado = true; break; }
+        }
+        if (!btnEncontrado) throw new Error("Botón verde no encontrado.");
+
+        await esperar(5000); 
+        
+        // Helper interno para este wizard
+        const encontrarFrameDelWizard = async (p) => {
+            const frames = p.frames();
+            for (const frame of frames) { if (await frame.$('#id_sc_field_id_servicio')) return frame; }
+            return null;
+        }
+
+        let wFrame = await encontrarFrameDelWizard(page);
+        if (!wFrame) { await esperar(3000); wFrame = await encontrarFrameDelWizard(page); }
+        if (!wFrame) throw new Error("No se detectó el formulario.");
+
+        // --- PASO 1: SELECCIÓN ESTRICTA POR DIRECCIÓN ---
+        console.log(`   1️⃣ Paso 1: Buscando coincidencia exacta con: "${datos.direccion}"`);
+        
+        const resultadoSeleccion = await wFrame.evaluate((textoA_Buscar) => {
+            const el = document.querySelector('#id_sc_field_id_servicio');
+            if (!el) return { exito: false, msg: "Error interno: Select no encontrado" };
+
+            if (!textoA_Buscar || textoA_Buscar.trim() === "") {
+                return { exito: false, msg: "ABORTADO: No se envió el dato 'direccion' en la solicitud." };
+            }
+
+            // CASO: Direccion no detectada
+            if (textoA_Buscar === "No detectada" && el.options.length > 1) {
+                el.selectedIndex = 1;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+                el.dispatchEvent(new Event('blur', { bubbles: true }));
+                return { exito: true, opcion: "Automática (No detectada)" };
+            }
+
+            for (let i = 0; i < el.options.length; i++) {
+                if (el.options[i].text.includes(textoA_Buscar)) {
+                    el.selectedIndex = i;
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    el.dispatchEvent(new Event('blur', { bubbles: true }));
+                    return { exito: true, opcion: el.options[i].text };
+                }
+            }
+            return { exito: false, msg: `ABORTADO: Ninguna opción contiene "${textoA_Buscar}"` };
+        }, datos.direccion);
+
+        if (!resultadoSeleccion.exito) {
+            const errorMsg = `❌ ${resultadoSeleccion.msg}`;
+            console.error(errorMsg);
+            await notificarBuilderBot({ numero: datos.numero, mensaje: errorMsg });
+            await gestionarNotificacionPush(idCliente, datos, false, "La dirección del servicio no coincide.");
+            await page.close();
+            return;
+        }
+
+        console.log(`      ✅ Servicio Seleccionado: "${resultadoSeleccion.opcion}"`);
+        await esperar(2000); 
+        await clickPorTexto(wFrame, 'Próximo');
+        await esperar(4000);
+
+        // --- PASO 2 ---
+        console.log("   2️⃣ Paso 2: Tipo y Forma");
+        
+        // Helper interno
+        const seleccionarComoServicio = async (frame, idExacto, textoBuscar) => {
+            console.log(`      -> Intentando seleccionar "${textoBuscar}" en #${idExacto}`);
+            return await frame.evaluate((id, txt) => {
+                const el = document.getElementById(id);
+                const norm = (s) => s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+                const busqueda = norm(txt);
+                const opcion = Array.from(el.options).find(opt => norm(opt.text).includes(busqueda));
+                if (opcion) {
+                    el.value = opcion.value;
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                    return true;
+                }
+                return false;
+            }, idExacto, textoBuscar);
+        };
+
+        if(datos.tipoPago) await seleccionarComoServicio(wFrame, 'id_sc_field_tipo_pago', datos.tipoPago);
+        await esperar(1500);
+        if(datos.formaPago) await seleccionarComoServicio(wFrame, 'id_sc_field_forma_pago', datos.formaPago);
+        await esperar(2000); 
+        await clickPorTexto(wFrame, 'Próximo');
+        await esperar(3000);
+
+        // --- PASO 3 ---
+        console.log("   3️⃣ Paso 3: Datos Financieros");
+
+        // Helper interno
+        const escribirBlindado = async (p, frame, etiquetaVisual, valor) => {
+            console.log(`      -> 🛡️ Escribiendo "${valor}" en [${etiquetaVisual}]`);
+            const idInput = await frame.evaluate((txt) => {
+                let el = null;
+                if (txt.includes("Monto")) el = document.querySelector('input[id*="monto"]');
+                if (txt.includes("Referencia")) el = document.querySelector('input[id*="referencia"]');
+                if (txt.includes("Fecha")) el = document.querySelector('input[id*="fecha"]');
+                if (!el) {
+                    const xpath = `//tr[contains(., '${txt}')]//input[not(@type='hidden')]`;
+                    const result = document.evaluate(xpath, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
+                    el = result.singleNodeValue;
+                }
+                return el ? el.id : null;
+            }, etiquetaVisual);
+
+            if(idInput) {
+                await frame.click(`#${idInput}`, {clickCount:3});
+                await p.keyboard.press('Backspace');
+                await esperar(100);
+                await p.keyboard.type(String(valor), {delay:100});
+                await frame.evaluate(() => { const t = document.querySelector('.scFormHeader')||document.body; t.click(); });
+                console.log(`            ✅ Escrito.`);
+            } else {
+                console.log(`            ❌ ERROR: Campo ${etiquetaVisual} no encontrado.`);
+            }
+        };
+
+        await escribirBlindado(page, wFrame, 'Monto', datos.monto);
+        console.log("          🛑 CUARENTENA: Esperando 8s...");
+        await esperar(8000); 
+        await escribirBlindado(page, wFrame, 'Referencia', datos.referencia);
+        await esperar(2000);
+        if(datos.fecha) await escribirBlindado(page, wFrame, 'Fecha', datos.fecha);
+
+        // TITULAR (OPCIONAL)
+        if (datos.titular_cuenta && datos.titular_cuenta.trim() !== "") {
+            console.log(`      📝 Escribiendo Titular: "${datos.titular_cuenta}"`);
+            const descArea = await wFrame.$('#id_sc_field_descripcion');
+            if(descArea) {
+                await descArea.click({clickCount:3});
+                await page.keyboard.press('Backspace');
+                await descArea.type(datos.titular_cuenta, {delay:50});
+            }
+        }
+
+        await esperar(1000); 
+        await clickPorTexto(wFrame, 'Próximo'); 
+        await esperar(3000);
+
+        // --- PASO 4 ---
+        console.log("   4️⃣ Paso 4: Imagen");
+        if(datos.rutaImagen) {
+            await subirComprobante(wFrame, datos.rutaImagen);
+        }
+
+        let fin = await clickPorTexto(wFrame, 'Agregar');
+        if(!fin) fin = await clickPorTexto(wFrame, 'Finalizar');
+        
+        console.log("       CLICK FINAL REALIZADO.");
+        await esperar(5000); 
+        await page.close();
+
+        // ===> WEBHOOK ÉXITO <===
+        console.log("   ✨ Notificando a BuilderBot...");
+        await notificarBuilderBot(datos);
+
+        // ---> NOTIFICAR ÉXITO PUSH
+        await gestionarNotificacionPush(idCliente, datos, true);
+
+    } catch(e) {
+        console.error("❌ ERROR EN SEGUNDO PLANO ICARO:", e.message);
+        await notificarBuilderBot({ numero: datos.numero, mensaje: `Error técnico: ${e.message}` });
+        await gestionarNotificacionPush(idCliente, datos, false, "Ocurrió un error técnico al registrar.");
+        if(page && !page.isClosed()) await page.close();
+    }
+}
+
+async function iniciarVidanet() {
+    console.log("🚀 [VIDANET] Iniciando...");
+    browserVidanet = await puppeteer.launch({ headless: "new", args: ['--no-sandbox', '--disable-setuid-sandbox', '--start-maximized'] });
+    pageVidanetDummy = await browserVidanet.newPage();
+    try { await pageVidanetDummy.goto(CONFIG_VIDANET.url, { waitUntil: 'networkidle2' }); } catch(e){}
+    console.log("✅ [VIDANET] Listo.");
+}
+
+async function procesarPagoVidanet(datos) {
+    if(!browserVidanet) await iniciarVidanet();
+    console.log(`\n🤖 --- [VIDANET] PAGO REF: ${datos.referencia} ---`);
+    const page = await browserVidanet.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    let resultado = "", esExito = false;
+
+    try {
+        await page.goto(CONFIG_VIDANET.url, {waitUntil:'domcontentloaded'}); await esperar(1000);
+        await seleccionarLetra(page, datos.letra);
+        const inp = await page.$('input[type="text"]');
+        if(inp) { await inp.click({clickCount:3}); await inp.type(datos.cedula); await page.keyboard.press('Enter'); }
+
+        try {
+            await page.waitForFunction(() => {
+                const els = document.querySelectorAll('div.font-bold.text-gray-900');
+                return Array.from(els).some(e => e.innerText.includes('Deuda #'));
+            }, {timeout:15000});
+        } catch(e) { throw new Error("No hay deudas o no cargó."); }
+        await esperar(2000);
+
+        let ids = datos.id_deuda;
+        if(typeof ids === 'string' && ids !== 'todas') ids = [ids];
+        await manipularDeudas(page, 'SELECT', ids);
+
+        if(!(await clickGeometrico(page, "Continuar"))) throw new Error("Fallo click Continuar");
+        
+        console.log("      ⏳ Bancos...");
+        try { await page.waitForFunction(()=>document.body.innerText.includes('Banco'), {timeout:8000}); }
+        catch(e) { await clickGeometrico(page, "Continuar"); await esperar(2000); }
+
+        const bKey = datos.banco.includes("Venezuela") ? "Venezuela" : "Credito";
+        if(!(await clickCentroPuro(page, bKey))) throw new Error("Banco no encontrado");
+        await esperar(2000);
+        await clickCentroPuro(page, "Entendido");
+        await esperar(1500);
+
+        const refInp = await page.$('input[placeholder*="Referencia"]') || (await page.$$('input[type="text"]')).pop();
+        if(refInp) { await refInp.click({clickCount:3}); await refInp.type(datos.referencia); }
+
+        console.log("      ⏳ Validando...");
+        await esperar(1000);
+        const clickHecho = await clickBotonValidar(page);
+        if (!clickHecho) {
+            console.log("      ⚠️ Falló click Validar. Usando ENTER...");
+            await page.keyboard.press('Enter');
+        }
+        await esperar(8000);
+
+        const txt = await page.evaluate(()=>document.body.innerText);
+        if(txt.includes("Referencia no encontrada")) {
+            resultado = "Vidanet: Referencia no encontrada."; esExito=false;
+        } else if(txt.includes("Detalle") || txt.includes("Resumen")) {
+            resultado = "¡Pago Vidanet Exitoso!"; esExito=true;
+        } else {
+            resultado = "Resultado ambiguo. Verificar."; esExito=false;
+        }
+
+        await page.close();
+        await notificarBuilderBot({numero:datos.numero, mensaje:resultado});
+        await gestionarNotificacionPush(datos.cedula, datos, esExito, resultado);
+
+    } catch(e) {
+        console.error("❌ ERROR VIDANET:", e.message);
+        await notificarBuilderBot({numero:datos.numero, mensaje:`Error Vidanet: ${e.message}`});
+        await gestionarNotificacionPush(datos.cedula, datos, false, e.message);
+        if(page) await page.close();
+    }
+}
+
+// ==============================================================================
+// 4. MÓDULO ROBOT 2: EXTRACTOR DE SERVICIOS (V30 - ORIGINAL)
+// ==============================================================================
+
+async function iniciarServicios() {
+    console.log("🚀 [SERVICIOS] Iniciando Motor...");
+    browserServicios = await puppeteer.launch({ 
+        headless: "new", 
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1920,1080'] 
+    });
+    pageServicios = await browserServicios.newPage();
+    await pageServicios.setRequestInterception(true);
+    pageServicios.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
+    
+    await pageServicios.goto(CONFIG_ICARO.urlLogin, {waitUntil:'networkidle2'});
+    if(await pageServicios.$(CONFIG_ICARO.selUser)) {
+        await pageServicios.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
+        await pageServicios.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
+        await pageServicios.evaluate(() => {
+            document.querySelectorAll('span').forEach(s => { if(s.innerText.includes('Login')) s.click(); });
+        });
+        await pageServicios.waitForNavigation({waitUntil:'networkidle2'});
+        console.log("✅ [SERVICIOS] Login OK.");
+    }
+}
+
+async function escanearFramesServicios(page) {
+    for (const frame of page.frames()) {
+        try {
+            const data = await frame.evaluate(() => {
+                const planesElements = document.querySelectorAll('span[id^="id_sc_field_codigo_producto_"]');
+                if (planesElements.length === 0) return null;
+                const resultados = [];
+                let nombreGlobal = "N/A";
+
+                planesElements.forEach((elPlan, index) => {
+                    const fila = elPlan.closest('tr[id^="SC_ancor"]');
+                    if (fila) {
+                        const limpiar = (texto, etiqueta) => {
+                            if (!texto) return "N/A";
+                            if (etiqueta) texto = texto.replace(etiqueta, '');
+                            return texto.replace(/[\n\r]+/g, ' ').trim();
+                        };
+                        const getTexto = (partialId) => {
+                            const el = fila.querySelector(`[id^="${partialId}"]`);
+                            return el ? el.innerText : "";
+                        };
+
+                        let plan = getTexto("id_sc_field_codigo_producto_");
+                        plan = limpiar(plan, "Plan:");
+                        let ip = getTexto("id_sc_field_ip_servicio_");
+                        ip = limpiar(ip, "Ip Servicio:");
+
+                        if (nombreGlobal === "N/A") {
+                            let cliente = getTexto("id_sc_field_id_cliente_") || getTexto("id_sc_field_nombre_cliente_");
+                            nombreGlobal = limpiar(cliente, "Cliente:");
+                        }
+
+                        const elDir = fila.querySelector('a[id^="bdireccion_servicio"]');
+                        let dir = "No detectada";
+                        if (elDir) {
+                            dir = elDir.getAttribute('title') || "No detectada";
+                            dir = dir.replace(/^B\/\s*/i, '').trim();
+                        }
+
+                        const estado = getTexto("id_sc_field_estado_");
+                        const saldo = getTexto("id_sc_field_saldo_");
+                        const fecha = getTexto("id_sc_field_fecha_corte_actual_");
+
+                        resultados.push({
+                            numero_servicio: index + 1,
+                            plan: plan,
+                            ip: ip,
+                            estado: estado || "N/A",
+                            saldo: saldo || "N/A",
+                            fecha_corte: fecha || "N/A",
+                            direccion: dir
+                        });
+                    }
+                });
+                return { nombre_cliente: nombreGlobal, servicios: resultados };
+            });
+            if (data) return data; 
+        } catch(e) {}
+    }
+    return null;
+}
+
+async function esperarServicios(page) {
+    console.log(`      ⏳ Escaneando tabla de servicios...`);
+    for (let i = 0; i < 8; i++) { 
+        const data = await escanearFramesServicios(page);
+        if (data && data.servicios.length > 0) {
+            console.log(`      ✅ Datos capturados (${data.servicios.length} servicios).`);
+            return data;
+        }
+        await esperar(1000);
+    }
+    console.log("      ⚠️ Tiempo agotado o tabla vacía.");
+    return null;
+}
+
+async function buscarClienteServicios(idBusqueda) {
+    if(!browserServicios) throw new Error("Sistema iniciando...");
+    console.log(`🤖 [SERVICIOS] Buscando: ${idBusqueda}`);
+    const page = await browserServicios.newPage();
+    page.setDefaultNavigationTimeout(60000);
+    await page.setRequestInterception(true);
+    page.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
+
+    try {
+        await page.goto(CONFIG_ICARO.urlLista, {waitUntil:'networkidle2'});
+        if(await page.$('#SC_fast_search_top')) {
+            await page.type('#SC_fast_search_top', idBusqueda);
+            await page.click('#SC_fast_search_submit_top');
+            await esperar(3000);
+        }
+
+        const err = await page.evaluate(() => document.querySelector('#sc_grid_body')?.innerText);
+        if(err && err.includes('No hay registros')) { await page.close(); return {success:false, mensaje:"No hay registros"}; }
+
+        await page.waitForSelector('.fa-user-edit', {timeout:10000});
+        const newTarget = browserServicios.waitForTarget(t => t.opener() === page.target());
+        await page.click('.fa-user-edit');
+        const tab = await (await newTarget).page();
+        await tab.setRequestInterception(true);
+        tab.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
+        await tab.bringToFront(); await esperar(4000);
+
+        const encontrarFrame = async (s) => { for(const f of tab.frames()) if(await f.$(s)) return f; return null; };
+        
+        // Datos Básicos
+        let codigo="N/A", movil="N/A", fijo="N/A", linkPago="No capturado";
+        const fDatos = await encontrarFrame('#id_sc_field_cod_cliente');
+        if(fDatos) {
+            const d = await fDatos.evaluate(() => ({
+                c: document.querySelector('#id_sc_field_cod_cliente')?.value,
+                m: document.querySelector('#id_sc_field_telefono_movil')?.value,
+                f: document.querySelector('#id_sc_field_telefono_fijo')?.value
+            }));
+            codigo=d.c; movil=d.m; fijo=d.f;
+            console.log("      ✅ Inputs extraídos."); // <--- LOG RESTAURADO
+        }
+
+        // Link
+        const fLink = await encontrarFrame('#sc_copiar_top');
+        if(fLink) {
+            const p = new Promise(r => {
+                const t = setTimeout(()=>r(null), 1500);
+                tab.once('dialog', async d => { clearTimeout(t); r(d.message().replace("Texto copiado con éxito:","").trim()); await d.accept(); });
+            });
+            await fLink.click('#sc_copiar_top');
+            const l = await p;
+            if(l) {
+                linkPago = l;
+                console.log("      ✅ Link copiado."); // <--- LOG RESTAURADO
+            }
+        }
+
+        // Servicios
+        console.log("      ⬇️ Escaneando servicios...");
+        const fTabs = await encontrarFrame('#cel2 a');
+        if(fTabs) try{ await fTabs.click('#cel2 a'); await esperar(1500); }catch(e){}
+
+        let resultado = await esperarServicios(tab);
+        let nombreCliente = "N/A";
+        let listaServicios = [];
+
+        if (resultado) {
+            nombreCliente = resultado.nombre_cliente || "N/A";
+            listaServicios = resultado.servicios || [];
+        }
+
+        await tab.close(); await page.close();
+        return { id_busqueda: idBusqueda, nombre_cliente: nombreCliente, codigo_cliente: codigo, movil, fijo, link_pago: linkPago, servicios: listaServicios };
+
+    } catch(e) { if(page) await page.close(); throw e; }
+}
+
+// ==============================================================================
+// 5. MÓDULO ROBOT 3: EXTRACTOR DE FINANZAS (V18 - ORIGINAL)
+// ==============================================================================
+
+async function iniciarFinanzas() {
+    console.log("🚀 [FINANZAS] Iniciando Motor...");
+    browserFinanzas = await puppeteer.launch({ 
+        headless: "new", 
+        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--start-maximized'] 
+    });
+    pageFinanzas = await browserFinanzas.newPage();
+    await pageFinanzas.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2' });
+    if(await pageFinanzas.$(CONFIG_ICARO.selUser)) {
+        await pageFinanzas.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
+        await pageFinanzas.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
+        await pageFinanzas.evaluate(() => {
+            document.querySelectorAll('span').forEach(s => { if(s.innerText.includes('Login')) s.click(); });
+        });
+        await pageFinanzas.waitForNavigation({ waitUntil: 'networkidle2' });
+        console.log("✅ [FINANZAS] Login OK.");
+    }
+}
+
+async function escanearFramesFinanzas(page, tipoObjetivo) {
+    for (const frame of page.frames()) {
+        try {
+            const data = await frame.evaluate((tipo) => {
+                const rows = document.querySelectorAll('tr[id^="SC_ancor"]');
+                
+                // --- FACTURAS ---
+                if (tipo === 'facturas') {
+                    if (rows.length === 0) return null;
+                    let facturas = [];
+                    const esTablaFactura = document.querySelector('[id^="id_sc_field_nro_factura"]');
+                    if (!esTablaFactura && rows.length > 0) return null;
+
+                    rows.forEach(r => {
+                        const getNro = r.querySelector('[id^="id_sc_field_nro_factura"]');
+                        if (getNro) {
+                            const getTxt = (id) => r.querySelector(`[id^="${id}"]`)?.innerText.trim() || "";
+                            facturas.push({
+                                numero: getTxt('id_sc_field_nro_factura'),
+                                fecha: getTxt('id_sc_field_fecha_emision'),
+                                estado: getTxt('id_sc_field_status'),
+                                monto: getTxt('id_sc_field_total_neto'),
+                                saldo: getTxt('id_sc_field_saldo')
+                            });
+                        }
+                    });
+                    return facturas.length ? facturas : null;
+                }
+
+                // --- TRANSACCIONES ---
+                if (tipo === 'transacciones') {
+                    if (rows.length === 0) return null;
+                    let trans = [];
+                    const esTablaTrans = document.querySelector('[id^="id_sc_field_referencia"]');
+                    if (!esTablaTrans) return null;
+
+                    rows.forEach(r => {
+                        const getRef = r.querySelector('[id^="id_sc_field_referencia"]');
+                        if (getRef) {
+                            const getTxt = (id) => r.querySelector(`[id^="${id}"]`)?.innerText.trim() || "";
+                            trans.push({
+                                tipo: getTxt('id_sc_field_nombtipo'),
+                                forma: getTxt('id_sc_field_nombforma'),
+                                referencia: getTxt('id_sc_field_referencia'),
+                                monto_bs: getTxt('id_sc_field_monto_bs'),
+                                fecha: getTxt('id_sc_field_fecha_transaccion'),
+                                status: getTxt('id_sc_field_status')
+                            });
+                        }
+                    });
+                    return trans.length ? trans : null;
+                }
+            }, tipoObjetivo);
+
+            if (data) return data; 
+        } catch(e) {}
+    }
+    return null;
+}
+
+async function esperarYExtraerFinanzas(page, tipo, intentosMax = 5) {
+    console.log(`      ⏳ Esperando datos de '${tipo}'...`);
+    for (let i = 0; i < intentosMax; i++) {
+        const data = await escanearFramesFinanzas(page, tipo);
+        if (data) {
+            console.log("      ✅ Datos capturados.");
+            return data;
+        }
+        await esperar(2000); 
+    }
+    console.log("      ⚠️ Tiempo agotado. No se detectaron datos.");
+    return null;
+}
+
+async function buscarClienteFinanzas(idBusqueda) {
+    if(!browserFinanzas) throw new Error("Sistema iniciando...");
+    console.log(`🤖 [FINANZAS] Procesando: ${idBusqueda}`);
+    const page = await browserFinanzas.newPage();
+
+    try {
+        await page.goto(CONFIG_ICARO.urlLista, {waitUntil:'networkidle2'});
+        if(await page.$('#SC_fast_search_top')) {
+            await page.type('#SC_fast_search_top', idBusqueda);
+            await page.click('#SC_fast_search_submit_top');
+            await esperar(5000);
+        }
+        await page.waitForSelector('.fa-user-edit', {timeout:15000});
+        const newTarget = browserFinanzas.waitForTarget(t => t.opener() === page.target());
+        await page.click('.fa-user-edit');
+        const tab = await (await newTarget).page();
+        await tab.bringToFront(); await esperar(4000);
+
+        // Facturas
+        console.log("      ⬇️ Facturas...");
+        try { await tab.click('#cel3 a'); await esperar(3000); } catch(e){}
+        let facturas = await esperarYExtraerFinanzas(tab, 'facturas', 5);
+
+        // Transacciones
+        console.log("      ⬇️ Transacciones...");
+        let clickTrans = false;
+        for (const frame of tab.frames()) {
+            try {
+                const clickeado = await frame.evaluate(() => {
+                    const els = Array.from(document.querySelectorAll('a, span, div'));
+                    const target = els.find(el => el.innerText.toUpperCase().includes("TRANSACCIONES"));
+                    if (target) { target.click(); return true; }
+                    return false;
+                });
+                if (clickeado) { clickTrans = true; break; }
+            } catch(e) {}
+        }
+
+        let transacciones = [];
+        if (clickTrans) {
+            console.log("      (Clic realizado. ESPERANDO 18 SEGUNDOS...)");
+            await esperar(18000); 
+            transacciones = await esperarYExtraerFinanzas(tab, 'transacciones', 5);
+        } else {
+            console.log("      ⚠️ No encontré botón 'Transacciones'.");
+        }
+
+        await tab.close(); await page.close();
+        return { id: idBusqueda, facturas: facturas || [], transacciones: transacciones || [] };
+
+    } catch(e) { if(page) await page.close(); throw e; }
+}
+
+// ==============================================================================
+// 6. ENDPOINTS API (RUTAS UNIFICADAS)
+// ==============================================================================
+
+// 1. REGISTRAR PAGO ICARO
+app.post('/pagar', (req, res) => {
+    const { id, datos } = req.body;
+    if (!id || !datos) return res.status(400).json({ error: "Faltan datos" });
+    console.log(`\n📨 Solicitud ICARO recibida ID: ${id}.`);
+    res.json({ status: "OK", message: "Procesando Icaro..." });
+    registrarPagoWizard(id, datos);
+});
+
+// 2. REGISTRAR PAGO VIDANET
+app.post('/pagar-vidanet', (req, res) => {
+    const { datos } = req.body;
+    if (!datos) return res.status(400).json({ error: "Faltan datos" });
+    console.log(`\n📨 Solicitud VIDANET recibida.`);
+    res.json({ status: "OK", message: "Procesando Vidanet..." });
+    procesarPagoVidanet(datos);
+});
+
+// 3. CONSULTAR DEUDAS VIDANET (GET)
+app.get('/consultar-deudas-vidanet', async (req, res) => {
+    const { letra, cedula } = req.query; 
+    if (!letra || !cedula) return res.status(400).json({ error: "Faltan datos" });
+    console.log(`\n🔍 [VIDANET] Consultando: ${letra}-${cedula}`);
+    
+    if (!browserVidanet) await iniciarVidanet();
+    const page = await browserVidanet.newPage();
+    try {
+        page.setDefaultNavigationTimeout(60000);
+        await page.goto(CONFIG_VIDANET.url, { waitUntil: 'domcontentloaded' }); await esperar(1000);
+        await seleccionarLetra(page, letra); 
+        const inp = await page.$('input[type="text"]');
+        if (inp) { await inp.click({clickCount:3}); await inp.type(cedula); await page.keyboard.press('Enter'); }
+        
+        try {
+            await page.waitForFunction(() => {
+                const hayDeuda = document.querySelectorAll('div.font-bold.text-gray-900').length > 0;
+                const hayError = document.body.innerText.includes('no encontrada') || document.body.innerText.includes('No existe');
+                return hayDeuda || hayError;
+            }, { timeout: 30000 });
+        } catch (e) {
+            await page.screenshot({ path: 'debug-vidanet.png' });
+            throw new Error("Timeout espera. Ver debug-vidanet.png");
+        }
+        
+        const txt = await page.evaluate(() => document.body.innerText);
+        if (txt.includes("no encontrada") || txt.includes("No existe")) {
+            await page.close(); return res.json({ success: true, deudas: [], mensaje: "Sin deudas." });
+        }
+        await esperar(1000);
+        const lista = await manipularDeudas(page, 'SCAN');
+        await page.close();
+        res.json({ success: true, deudas: lista });
+    } catch (e) {
+        if(!page.isClosed()) await page.close();
+        res.status(500).json({ success: false, error: e.message });
+    }
+});
+
+// 4. BUSCAR SERVICIOS (ROBOT 2) - *RUTA NUEVA: /buscar-servicios*
+app.get('/buscar-servicios', async (req, res) => {
+    try {
+        const datos = await buscarClienteServicios(req.query.id);
+        res.json({ success: true, data: datos });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// 5. BUSCAR FINANZAS (ROBOT 3) - *RUTA NUEVA: /buscar-finanzas*
+app.get('/buscar-finanzas', async (req, res) => {
+    try {
+        const datos = await buscarClienteFinanzas(req.query.id);
+        res.json({ success: true, data: datos });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.get('/', (req, res) => res.send("🤖 MEGA-ROBOT UNIFICADO ACTIVO"));
+
+// ==============================================================================
+// 7. ARRANQUE Y MANTENIMIENTO
+// ==============================================================================
+
+app.listen(PORT, async () => {
+    console.log(`\n🌍 MEGA-SERVIDOR ACTIVO EN PUERTO: ${PORT}`);
+    
+    // Arranque Inicial de TODOS los motores
+    await iniciarRegistrador();
+    await iniciarVidanet();
+    await iniciarServicios();
+    await iniciarFinanzas();
+
+    // --- CICLOS DE MANTENIMIENTO INDEPENDIENTES ---
+
+    // 1. Registradores (Cada 5 min)
+    setInterval(async () => {
+        console.log("\n♻️ [MANT] Reiniciando Registradores...");
+        if (browserRegistrador) { try{await browserRegistrador.close();}catch(e){} browserRegistrador=null; }
+        if (browserVidanet) { try{await browserVidanet.close();}catch(e){} browserVidanet=null; }
+        await iniciarRegistrador();
+        await iniciarVidanet();
+    }, 1200000);
+
+    // 2. Servicios & Finanzas (Cada 10 min - Sincronizados para ahorrar recursos)
+    setInterval(async () => {
+        console.log("\n♻️ [MANT] Reiniciando Extractores...");
+        if (browserServicios) { try{await browserServicios.close();}catch(e){} browserServicios=null; }
+        if (browserFinanzas) { try{await browserFinanzas.close();}catch(e){} browserFinanzas=null; }
+        await iniciarServicios();
+        await iniciarFinanzas();
+    }, 1000000);
+});
