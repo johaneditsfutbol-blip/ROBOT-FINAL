@@ -1073,7 +1073,7 @@ app.listen(PORT, async () => {
         if (browserVidanet) { try{await browserVidanet.close();}catch(e){} browserVidanet=null; }
         await iniciarRegistrador();
         await iniciarVidanet();
-    }, 1200000);
+    }, 900000);
 
     // 2. Servicios & Finanzas (Cada 10 min - Sincronizados para ahorrar recursos)
     setInterval(async () => {
@@ -1082,5 +1082,5 @@ app.listen(PORT, async () => {
         if (browserFinanzas) { try{await browserFinanzas.close();}catch(e){} browserFinanzas=null; }
         await iniciarServicios();
         await iniciarFinanzas();
-    }, 1000000);
+    }, 900000);
 });
