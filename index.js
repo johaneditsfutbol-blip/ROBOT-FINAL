@@ -745,67 +745,109 @@ async function esperarServicios(page) {
 }
 
 async function buscarClienteServicios(idBusqueda) {
-    if(!browserServicios) throw new Error("Sistema iniciando...");
+    if (!browserServicios) throw new Error("Sistema iniciando...");
     console.log(`🤖 [SERVICIOS] Buscando: ${idBusqueda}`);
+    
+    // --- LÓGICA ORIGINAL RESTAURADA ---
     const page = await browserServicios.newPage();
     page.setDefaultNavigationTimeout(60000);
+
     await page.setRequestInterception(true);
-    page.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
+    page.on('request', (req) => {
+        if (['image', 'media', 'font'].includes(req.resourceType())) req.abort();
+        else req.continue();
+    });
 
     try {
-        await page.goto(CONFIG_ICARO.urlLista, {waitUntil:'networkidle2'});
-        if(await page.$('#SC_fast_search_top')) {
-            await page.type('#SC_fast_search_top', idBusqueda);
+        await page.goto(CONFIG_ICARO.urlLista, { waitUntil: 'networkidle2' });
+
+        const searchIn = '#SC_fast_search_top'; 
+        if (await page.$(searchIn)) {
+            await page.type(searchIn, idBusqueda);
             await page.click('#SC_fast_search_submit_top');
-            await esperar(3000);
+            await esperar(3000); 
         }
 
-        const err = await page.evaluate(() => document.querySelector('#sc_grid_body')?.innerText);
-        if(err && err.includes('No hay registros')) { await page.close(); return {success:false, mensaje:"No hay registros"}; }
+        const mensajeError = await page.evaluate(() => {
+            const el = document.querySelector('#sc_grid_body');
+            return el ? el.innerText.trim() : null;
+        });
+        if (mensajeError && mensajeError.includes('No hay registros')) {
+            await page.close();
+            return { success: false, mensaje: "No hay registros" };
+        }
 
-        await page.waitForSelector('.fa-user-edit', {timeout:10000});
-        const newTarget = browserServicios.waitForTarget(t => t.opener() === page.target());
+        try { await page.waitForSelector('.fa-user-edit', { timeout: 10000 }); } 
+        catch(e) { throw new Error("Cliente no encontrado."); }
+
+        const newTargetPromise = browserServicios.waitForTarget(target => target.opener() === page.target());
         await page.click('.fa-user-edit');
-        const tab = await (await newTarget).page();
-        await tab.setRequestInterception(true);
-        tab.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
-        await tab.bringToFront(); await esperar(4000);
-
-        const encontrarFrame = async (s) => { for(const f of tab.frames()) if(await f.$(s)) return f; return null; };
+        const tab = await (await newTargetPromise).page();
         
-        // Datos Básicos
-        let codigo="N/A", movil="N/A", fijo="N/A", linkPago="No capturado";
-        const fDatos = await encontrarFrame('#id_sc_field_cod_cliente');
-        if(fDatos) {
-            const d = await fDatos.evaluate(() => ({
-                c: document.querySelector('#id_sc_field_cod_cliente')?.value,
-                m: document.querySelector('#id_sc_field_telefono_movil')?.value,
-                f: document.querySelector('#id_sc_field_telefono_fijo')?.value
-            }));
-            codigo=d.c; movil=d.m; fijo=d.f;
-            console.log("      ✅ Inputs extraídos."); // <--- LOG RESTAURADO
-        }
+        await tab.setRequestInterception(true);
+        tab.on('request', (req) => {
+            if (['image', 'media', 'font'].includes(req.resourceType())) req.abort();
+            else req.continue();
+        });
 
-        // Link
-        const fLink = await encontrarFrame('#sc_copiar_top');
-        if(fLink) {
-            const p = new Promise(r => {
-                const t = setTimeout(()=>r(null), 1500);
-                tab.once('dialog', async d => { clearTimeout(t); r(d.message().replace("Texto copiado con éxito:","").trim()); await d.accept(); });
-            });
-            await fLink.click('#sc_copiar_top');
-            const l = await p;
-            if(l) {
-                linkPago = l;
-                console.log("      ✅ Link copiado."); // <--- LOG RESTAURADO
+        await tab.bringToFront();
+        await esperar(4000); 
+
+        // Helper interno original
+        const encontrarFrame = async (selector) => {
+            for (const frame of tab.frames()) {
+                try { if (await frame.$(selector)) return frame; } catch(e){}
             }
+            return null;
+        };
+
+        // --- A. DATOS FIJOS ---
+        let codigo = "N/A", movil = "N/A", fijo = "N/A";
+        const frameDatos = await encontrarFrame('#id_sc_field_cod_cliente');
+        
+        if (frameDatos) {
+            const datos = await frameDatos.evaluate(() => {
+                const getVal = (id) => { 
+                    const el = document.querySelector(id); return el ? el.value : "N/A"; 
+                };
+                return {
+                    c: getVal('#id_sc_field_cod_cliente'),
+                    m: getVal('#id_sc_field_telefono_movil'),
+                    f: getVal('#id_sc_field_telefono_fijo')
+                };
+            });
+            codigo = datos.c; movil = datos.m; fijo = datos.f;
+            console.log("      ✅ Inputs extraídos.");
         }
 
-        // Servicios
-        console.log("      ⬇️ Escaneando servicios...");
-        const fTabs = await encontrarFrame('#cel2 a');
-        if(fTabs) try{ await fTabs.click('#cel2 a'); await esperar(1500); }catch(e){}
+        // --- B. LINK (Lógica Original con Timeout 1.5s) ---
+        let linkPago = "No capturado";
+        const frameLink = await encontrarFrame('#sc_copiar_top');
+        if (frameLink) {
+            try {
+                const dialogPromise = new Promise(resolve => {
+                    const t = setTimeout(() => resolve(null), 1500); 
+                    tab.once('dialog', async dialog => {
+                        clearTimeout(t);
+                        linkPago = dialog.message().replace("Texto copiado con éxito:", "").trim();
+                        await dialog.accept(); 
+                        resolve(true);
+                    });
+                });
+                await frameLink.click('#sc_copiar_top');
+                await dialogPromise;
+                if(linkPago !== "No capturado") console.log("      ✅ Link copiado.");
+            } catch (e) {}
+        }
 
+        // --- C. SERVICIOS ---
+        console.log("      ⬇️ Escaneando servicios...");
+        const frameTabs = await encontrarFrame('#cel2 a');
+        if (frameTabs) {
+             try { await frameTabs.click('#cel2 a'); await esperar(1500); } catch(e){}
+        }
+        
+        // Aquí usa la función externa esperarServicios (que ya incluye escanearFramesServicios)
         let resultado = await esperarServicios(tab);
         let nombreCliente = "N/A";
         let listaServicios = [];
@@ -815,10 +857,23 @@ async function buscarClienteServicios(idBusqueda) {
             listaServicios = resultado.servicios || [];
         }
 
-        await tab.close(); await page.close();
-        return { id_busqueda: idBusqueda, nombre_cliente: nombreCliente, codigo_cliente: codigo, movil, fijo, link_pago: linkPago, servicios: listaServicios };
+        await tab.close();
+        await page.close();
 
-    } catch(e) { if(page) await page.close(); throw e; }
+        return {
+            id_busqueda: idBusqueda,
+            nombre_cliente: nombreCliente,
+            codigo_cliente: codigo,
+            movil: movil,
+            fijo: fijo,
+            link_pago: linkPago,
+            servicios: listaServicios
+        };
+
+    } catch (error) {
+        if(page && !page.isClosed()) await page.close();
+        throw error;
+    }
 }
 
 // ==============================================================================
