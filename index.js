@@ -594,8 +594,27 @@ async function registrarPagoWizard(idCliente, datos) {
         }
 
         await esperar(1000); 
+        console.log("   ➡️ Cambiando de pantalla...");
         await clickPorTexto(wFrame, 'Próximo'); 
-        await esperar(3000);
+        
+        // ESPERA CRÍTICA PARA QUE EL FRAME NUEVO CARGUE
+        await esperar(5000); 
+
+        // 🚨 RE-CAPTURA DEL FRAME (ESTO ES LO QUE TE FALTA) 🚨
+        // La variable wFrame vieja ya no sirve. Buscamos el frame que tenga el input de archivo.
+        wFrame = page.frames().find(f => f.url().includes('form_') || f.name().includes('nm_iframe'));
+        
+        // Si no lo encontramos por nombre, lo buscamos por contenido (el input file)
+        if (!wFrame) {
+            console.log("   ⚠️ Buscando frame por contenido (input file)...");
+            for (const f of page.frames()) {
+                const tieneFile = await f.$('input[type="file"]');
+                if (tieneFile) { wFrame = f; break; }
+            }
+        }
+        
+        if (!wFrame) throw new Error("No se encontró el frame de la pantalla 2 (Imagen).");
+        console.log("   ✅ Frame de Pantalla 2 capturado.");
 
 // --- PASO 4: EL BLOQUEO DE SALIDA (FIX RAILWAY) ---
         console.log("   4️⃣ Paso 4: Submit con 'Promise.all' (Obligatorio en Docker)");
