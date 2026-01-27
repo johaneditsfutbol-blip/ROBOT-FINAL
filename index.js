@@ -56,12 +56,12 @@ let pageFinanzas = null;
 const LAUNCH_ARGS = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
+    '--disable-dev-shm-usage', // <--- OBLIGATORIO: Evita que Chrome explote la RAM en Railway
     '--disable-gpu',
     '--no-first-run',
     '--no-zygote',
-    '--single-process',
-    '--start-maximized'
+    '--hide-scrollbars'
+    // IMPORTANTE: Se eliminó '--single-process' porque congela los submits en Linux
 ];
 
 // ==============================================================================
