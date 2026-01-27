@@ -107,8 +107,11 @@ function notificarBuilderBot(datos) {
 
 async function gestionarNotificacionPush(idCliente, datos, esExito, mensajeDetalle) {
     try {
-        console.log(`   📱 [PUSH] Procesando para: ${idCliente}`);
-        const urlGet = `${PUSH_CONFIG.supabaseUrl}?codigo_cliente=ilike.*${idCliente}*&select=expo_push_token`;
+        console.log(`   📱 [PUSH MULTI-DEVICE] Procesando para ID entrada: ${idCliente}`);
+        
+        // 1. BUSCAR TODOS LOS TOKENS ASOCIADOS
+        const urlGet = `${PUSH_CONFIG.supabaseUrl}?codigo_cliente=ilike.*${idCliente}*&select=expo_push_token,codigo_cliente`;
+        
         const respSupabase = await fetch(urlGet, {
             method: 'GET',
             headers: {
@@ -117,30 +120,71 @@ async function gestionarNotificacionPush(idCliente, datos, esExito, mensajeDetal
                 'Content-Type': 'application/json'
             }
         });
-        if (!respSupabase.ok) return;
-        const dataSupabase = await respSupabase.json();
-        if (!dataSupabase || !dataSupabase.length || !dataSupabase[0].expo_push_token) return;
 
-        const pushToken = dataSupabase[0].expo_push_token;
+        if (!respSupabase.ok) return;
+        const listaDispositivos = await respSupabase.json();
+        
+        // Si no hay dispositivos, salimos
+        if (!listaDispositivos || !listaDispositivos.length) return;
+
+        // Tomamos el codigo_cliente real del primer resultado (asumimos que todos son del mismo cliente)
+        const codigoClienteReal = listaDispositivos[0].codigo_cliente;
+
+        // Preparar el mensaje (igual que antes)
         let titulo = esExito ? "✅ PAGO CONFIRMADO" : "❌ PAGO NO PROCESADO";
         let cuerpo = esExito 
             ? `\n🆔 REF: #${datos.referencia}\n📅 FECHA: ${datos.fecha || new Date().toLocaleDateString()}\n💵 MONTO: ${datos.monto || "N/A"}\n\n🚀 Tu servicio será reactivado automáticamente.`
             : `\n🆔 REF: #${datos.referencia}\n⚠️ MOTIVO: ${mensajeDetalle}\n\nVerifica tu comprobante e intenta nuevamente.`;
 
-        await fetch(PUSH_CONFIG.expoUrl, {
+        // 2. ENVIAR NOTIFICACIÓN A TODOS LOS TOKENS (Bucle Promesa)
+        // Creamos una lista de promesas para enviar todos los push "al mismo tiempo"
+        const promesasDeEnvio = listaDispositivos.map(dispositivo => {
+            const token = dispositivo.expo_push_token;
+            if (!token) return null; // Saltar si es nulo
+
+            return fetch(PUSH_CONFIG.expoUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    to: token, // <--- Aquí cambia dinámicamente para cada celular
+                    title: titulo,
+                    body: cuerpo,
+                    priority: "high",
+                    sound: "default",
+                    badge: 1,
+                    data: { referencia: datos.referencia, estado: esExito ? 'success' : 'fail' }
+                })
+            });
+        });
+
+        // Esperamos a que se envíen todos (sin detener si uno falla)
+        await Promise.all(promesasDeEnvio);
+        console.log(`   🚀 Push enviado a ${promesasDeEnvio.length} dispositivos.`);
+
+        // 3. GUARDAR EN HISTORIAL (SOLO UNA VEZ)
+        const urlHistorial = PUSH_CONFIG.supabaseUrl.replace('push_tokens', 'historial_notificaciones');
+
+        await fetch(urlHistorial, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: {
+                'apikey': PUSH_CONFIG.supabaseKey,
+                'Authorization': `Bearer ${PUSH_CONFIG.supabaseKey}`,
+                'Content-Type': 'application/json',
+                'Prefer': 'return=minimal'
+            },
             body: JSON.stringify({
-                to: pushToken,
-                title: titulo,
-                body: cuerpo,
-                priority: "high",
-                sound: "default",
-                badge: 1,
-                data: { referencia: datos.referencia, estado: esExito ? 'success' : 'fail' }
+                codigo_cliente: codigoClienteReal,
+                titulo: titulo,
+                cuerpo: cuerpo,
+                leido: false
             })
         });
-    } catch (e) { console.error("   ❌ [PUSH] Error:", e.message); }
+        
+        console.log(`   💾 Guardado en historial único para: ${codigoClienteReal}`);
+
+    } catch (e) { 
+        console.error("   ❌ [PUSH ERROR]:", e.message); 
+    }
 }
 
 function descargarImagenTemporal(url) {
