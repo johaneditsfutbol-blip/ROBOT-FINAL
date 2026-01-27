@@ -58,12 +58,20 @@ let pageFinanzas = null;
 const LAUNCH_ARGS = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage', // <--- OBLIGATORIO: Evita que Chrome explote la RAM en Railway
+    '--disable-dev-shm-usage', // Vital para Railway
     '--disable-gpu',
     '--no-first-run',
     '--no-zygote',
-    '--hide-scrollbars'
-    // IMPORTANTE: Se eliminó '--single-process' porque congela los submits en Linux
+    // ------------------------------------------------------------
+    // 💀 PARCHES ANTI-CHROME-LIGERO 💀
+    // ------------------------------------------------------------
+    '--window-size=1920,1080',      // Fuerza resolución HD real
+    '--force-device-scale-factor=1', // Evita que Linux escale la interfaz
+    '--disable-features=IsolateOrigins,site-per-process', // CRÍTICO: Arregla iframes (Icaro) en entornos con poca RAM
+    '--disable-blink-features=AutomationControlled', // Esconde que es un robot
+    '--enable-features=NetworkService,NetworkServiceInProcess', // Mejora la red en Linux
+    '--lang=es-419', // Fuerza español latino
+    // ------------------------------------------------------------
 ];
 
 // ==============================================================================
@@ -413,7 +421,14 @@ async function iniciarRegistrador() {
     console.log("🚀 [REGISTRADOR] Iniciando Icaro...");
     try {
         if(browserRegistrador) try{ await browserRegistrador.close(); }catch(e){}
-        browserRegistrador = await puppeteer.launch({ headless: "new", defaultViewport: null, args: LAUNCH_ARGS });
+        
+        browserRegistrador = await puppeteer.launch({ 
+            headless: "new", 
+            // EL TRUCO: Forzamos el viewport AQUI, no solo en la pagina
+            defaultViewport: { width: 1920, height: 1080 }, 
+            args: LAUNCH_ARGS 
+        });
+        
         pageRegistrador = await browserRegistrador.newPage();
         // Aumentamos timeout a 60s
         await pageRegistrador.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2', timeout: 60000 });
