@@ -1187,6 +1187,27 @@ app.get('/consultar-deudas-vidanet', async (req, res) => {
     }
 });
 
+// --- RUTA PARA VER LAS FOTOS DE EVIDENCIA ---
+app.get('/ver-foto/:nombre', (req, res) => {
+    const nombreArchivo = req.params.nombre; // El nombre que le pusiste en el screenshot
+    const rutaCompleta = path.resolve(__dirname, nombreArchivo);
+
+    if (fs.existsSync(rutaCompleta)) {
+        res.sendFile(rutaCompleta);
+    } else {
+        res.status(404).send(`
+            <h1>❌ Foto no encontrada</h1>
+            <p>Buscando: ${nombreArchivo}</p>
+            <p><b>Posibles causas:</b></p>
+            <ul>
+                <li>El nombre está mal escrito.</li>
+                <li>El robot no llegó a tomar la foto.</li>
+                <li><b>Railway se reinició:</b> Recuerda que cada vez que haces Deploy o el server crashea, los archivos se borran.</li>
+            </ul>
+        `);
+    }
+});
+
 // 4. BUSCAR SERVICIOS (ROBOT 2) - *RUTA NUEVA: /buscar-servicios*
 app.get('/buscar-servicios', async (req, res) => {
     try {
