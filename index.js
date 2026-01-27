@@ -595,42 +595,74 @@ async function registrarPagoWizard(idCliente, datos) {
         await clickPorTexto(wFrame, 'Próximo'); 
         await esperar(3000);
 
-        // --- PASO 4 ---
-        console.log("   4️⃣ Paso 4: Imagen");
+// --- PASO 4: MODO NUCLEAR ---
+        console.log("   4️⃣ Paso 4: Imagen y Ejecución Blindada");
+        
+        // 1. Subir la imagen
         if(datos.rutaImagen) {
             await subirComprobante(wFrame, datos.rutaImagen);
+            // ESPERA CRÍTICA: A veces la imagen tarda en "asentarse" en el formulario
+            await esperar(2000); 
         }
 
-        // 📸 FOTO 1: ANTES DEL CLIC (Para ver si el botón está habilitado o tapado)
-        await page.screenshot({ path: `debug_antes_click_${datos.referencia}.png` });
-        console.log("   📸 Foto PRE-CLIC guardada.");
+        // 2. TRUCO DE MAGIA: Click en la nada para validar campos
+        // Esto obliga a Icaro a reconocer que terminaste de escribir el monto/ref
+        await wFrame.evaluate(() => {
+            document.body.click(); 
+            document.querySelectorAll('input').forEach(i => i.blur());
+        });
+        await esperar(1000);
 
-        // INTENTO DE CLIC ROBUSTO
-        let botonFinal = await clickPorTexto(wFrame, 'Agregar');
-        if(!botonFinal) botonFinal = await clickPorTexto(wFrame, 'Finalizar');
+        console.log("   💣 DETONANDO BOTÓN 'AGREGAR'...");
 
-        if (botonFinal) {
-            console.log("       ✅ CLICK FINAL EJECUTADO (Según Puppeteer).");
+        // 3. CLICK POR ID (Más potente que por texto)
+        // Intentamos encontrar el botón por su ID real de programación (sc_b_ins...)
+        const clickRealizado = await wFrame.evaluate(() => {
+            // IDs comunes de botones "Insertar/Agregar" en ScriptCase (Icaro)
+            const idsProbables = ['sc_b_ins_t', 'sc_b_ins_b', 'sc_b_ins', 'id_sc_field_agregar'];
+            
+            for (const id of idsProbables) {
+                const btn = document.getElementById(id);
+                if (btn && btn.offsetParent !== null) { // Si existe y es visible
+                    btn.click();
+                    return `ID: ${id}`;
+                }
+            }
+            
+            // Si fallan los IDs, buscamos por texto a lo bruto
+            const botones = Array.from(document.querySelectorAll('a, button, span.scButton_default'));
+            const btnTexto = botones.find(b => b.innerText.trim().toUpperCase() === 'AGREGAR');
+            if (btnTexto) {
+                btnTexto.click();
+                return "TEXTO: AGREGAR";
+            }
+            return false;
+        });
+
+        if (clickRealizado) {
+            console.log(`   ✅ Click ejecutado vía: ${clickRealizado}`);
         } else {
-            console.error("       ❌ NO ENCONTRÉ EL BOTÓN FINAL.");
+            console.error("   ❌ NO SE PUDO DAR CLICK. (Revisa si el botón cambió de nombre)");
         }
 
-        // 🛑 ESPERA LARGA PARA VER RESULTADO (10 segundos)
-        // A veces Icaro tarda en procesar y si cierras antes, no guarda.
-        await esperar(10000); 
-
-        // 📸 FOTO 2: DESPUÉS DEL CLIC (Para ver si salió error o mensaje de éxito)
-        await page.screenshot({ path: `debug_despues_click_${datos.referencia}.png` });
-        console.log("   📸 Foto POST-CLIC guardada.");
-
-        // 🕵️ DETECTIVE DE TEXTO: ¿Qué dice la pantalla ahora?
-        const textoPantalla = await wFrame.evaluate(() => document.body.innerText);
-        if (textoPantalla.includes("Error") || textoPantalla.includes("Requerido") || textoPantalla.includes("Obligatorio")) {
-            console.error("   ⚠️ ALERTA: Veo palabras de error en la pantalla final.");
-            console.error("   Texto sospechoso: ", textoPantalla.substring(0, 200)); // Muestra los primeros 200 caracteres
-        } else {
-            console.log("   ℹ️ No veo errores evidentes en texto.");
+        // 4. LA ESPERA DE LA VERDAD
+        // No cerramos hasta ver que el formulario se haya limpiado o recargado
+        console.log("   ⏳ Esperando respuesta del servidor...");
+        
+        try {
+            // Esperamos que aparezca un mensaje de éxito O que el formulario se recargue
+            // Si Icaro guarda bien, suele recargar el frame.
+            await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 });
+        } catch(e) {
+            console.log("   ⚠️ NetworkIdle timeout (Icaro lento), pero seguimos.");
         }
+
+        // 5. FOTO DE EVIDENCIA FINAL
+        await page.screenshot({ path: `resultado_final_${datos.referencia}.png` });
+        console.log("   📸 FOTO FINAL TOMADA. (Reísala para ver si sale 'Agregado exitosamente')");
+
+        // SI NO CIERRAS AQUÍ, PUEDES VERLO CON TUS OJOS EN LOCAL
+        // await esperar(5000); // Descomenta esto si quieres verlo 5 segundos más antes de cerrar
 
         await page.close();
 
@@ -1222,6 +1254,12 @@ app.get('/buscar-finanzas', async (req, res) => {
         const datos = await buscarClienteFinanzas(req.query.id);
         res.json({ success: true, data: datos });
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// --- RUTA DE SALUD (Vital para que Railway sepa si el server vive) ---
+app.get('/health', (req, res) => {
+    // Si podemos responder esto, es que el event loop de Node funciona
+    res.status(200).send('OK - Alive');
 });
 
 app.get('/', (req, res) => res.send("🤖 MEGA-ROBOT UNIFICADO ACTIVO"));
