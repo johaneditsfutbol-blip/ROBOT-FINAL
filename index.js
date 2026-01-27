@@ -601,11 +601,37 @@ async function registrarPagoWizard(idCliente, datos) {
             await subirComprobante(wFrame, datos.rutaImagen);
         }
 
-        let fin = await clickPorTexto(wFrame, 'Agregar');
-        if(!fin) fin = await clickPorTexto(wFrame, 'Finalizar');
-        
-        console.log("       CLICK FINAL REALIZADO.");
-        await esperar(5000); 
+        // 📸 FOTO 1: ANTES DEL CLIC (Para ver si el botón está habilitado o tapado)
+        await page.screenshot({ path: `debug_antes_click_${datos.referencia}.png` });
+        console.log("   📸 Foto PRE-CLIC guardada.");
+
+        // INTENTO DE CLIC ROBUSTO
+        let botonFinal = await clickPorTexto(wFrame, 'Agregar');
+        if(!botonFinal) botonFinal = await clickPorTexto(wFrame, 'Finalizar');
+
+        if (botonFinal) {
+            console.log("       ✅ CLICK FINAL EJECUTADO (Según Puppeteer).");
+        } else {
+            console.error("       ❌ NO ENCONTRÉ EL BOTÓN FINAL.");
+        }
+
+        // 🛑 ESPERA LARGA PARA VER RESULTADO (10 segundos)
+        // A veces Icaro tarda en procesar y si cierras antes, no guarda.
+        await esperar(10000); 
+
+        // 📸 FOTO 2: DESPUÉS DEL CLIC (Para ver si salió error o mensaje de éxito)
+        await page.screenshot({ path: `debug_despues_click_${datos.referencia}.png` });
+        console.log("   📸 Foto POST-CLIC guardada.");
+
+        // 🕵️ DETECTIVE DE TEXTO: ¿Qué dice la pantalla ahora?
+        const textoPantalla = await wFrame.evaluate(() => document.body.innerText);
+        if (textoPantalla.includes("Error") || textoPantalla.includes("Requerido") || textoPantalla.includes("Obligatorio")) {
+            console.error("   ⚠️ ALERTA: Veo palabras de error en la pantalla final.");
+            console.error("   Texto sospechoso: ", textoPantalla.substring(0, 200)); // Muestra los primeros 200 caracteres
+        } else {
+            console.log("   ℹ️ No veo errores evidentes en texto.");
+        }
+
         await page.close();
 
         // ===> WEBHOOK ÉXITO <===
