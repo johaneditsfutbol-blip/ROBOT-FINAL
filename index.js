@@ -52,6 +52,17 @@ let pageServicios = null;
 let browserFinanzas = null;    // Para /buscar-finanzas (Robot V18)
 let pageFinanzas = null;
 
+// --- CONFIGURACIÓN BLINDADA (ESTO ES NUEVO) ---
+const LAUNCH_ARGS = [
+    '--no-sandbox',
+    '--disable-setuid-sandbox',
+    '--disable-dev-shm-usage',
+    '--disable-gpu',
+    '--no-first-run',
+    '--no-zygote',
+    '--single-process',
+    '--start-maximized'
+];
 
 // ==============================================================================
 // 2. HERRAMIENTAS COMUNES (Notificaciones & Helpers Básicos)
@@ -352,23 +363,27 @@ async function manipularDeudas(page, modo, idsObjetivo = []) {
 // --- LOGICA DE REGISTRO ---
 
 async function iniciarRegistrador() {
+    if (browserRegistrador && browserRegistrador.isConnected()) return;
     console.log("🚀 [REGISTRADOR] Iniciando Icaro...");
-    browserRegistrador = await puppeteer.launch({ 
-        headless: "new", 
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--start-maximized'] 
-    });
-    pageRegistrador = await browserRegistrador.newPage();
-    await pageRegistrador.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2' });
-    
-    if (await pageRegistrador.$(CONFIG_ICARO.selUser)) {
-        await pageRegistrador.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
-        await pageRegistrador.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
-        await pageRegistrador.evaluate(() => {
-            const spans = document.querySelectorAll('span');
-            for (const span of spans) if (span.innerText.includes('Login')) { span.click(); return; }
-        });
-        await pageRegistrador.waitForNavigation({ waitUntil: 'networkidle2' });
-        console.log("✅ [REGISTRADOR] Icaro Login OK.");
+    try {
+        if(browserRegistrador) try{ await browserRegistrador.close(); }catch(e){}
+        browserRegistrador = await puppeteer.launch({ headless: "new", defaultViewport: null, args: LAUNCH_ARGS });
+        pageRegistrador = await browserRegistrador.newPage();
+        // Aumentamos timeout a 60s
+        await pageRegistrador.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2', timeout: 60000 });
+        
+        if (await pageRegistrador.$(CONFIG_ICARO.selUser)) {
+            await pageRegistrador.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
+            await pageRegistrador.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
+            await pageRegistrador.evaluate(() => {
+                document.querySelectorAll('span').forEach(s => { if(s.innerText.includes('Login')) s.click(); });
+            });
+            await pageRegistrador.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
+            console.log("✅ [REGISTRADOR] Icaro Login OK.");
+        }
+    } catch(e) {
+        console.error("❌ Error iniciando Registrador:", e.message);
+        browserRegistrador = null;
     }
 }
 
@@ -565,11 +580,18 @@ async function registrarPagoWizard(idCliente, datos) {
 }
 
 async function iniciarVidanet() {
+    if (browserVidanet && browserVidanet.isConnected()) return;
     console.log("🚀 [VIDANET] Iniciando...");
-    browserVidanet = await puppeteer.launch({ headless: "new", args: ['--no-sandbox', '--disable-setuid-sandbox', '--start-maximized'] });
-    pageVidanetDummy = await browserVidanet.newPage();
-    try { await pageVidanetDummy.goto(CONFIG_VIDANET.url, { waitUntil: 'networkidle2' }); } catch(e){}
-    console.log("✅ [VIDANET] Listo.");
+    try {
+        if(browserVidanet) try{ await browserVidanet.close(); }catch(e){}
+        browserVidanet = await puppeteer.launch({ headless: "new", defaultViewport: null, args: LAUNCH_ARGS });
+        pageVidanetDummy = await browserVidanet.newPage();
+        try { await pageVidanetDummy.goto(CONFIG_VIDANET.url, { waitUntil: 'networkidle2', timeout: 60000 }); } catch(e){}
+        console.log("✅ [VIDANET] Listo.");
+    } catch(e) {
+        console.error("❌ Error iniciando Vidanet:", e.message);
+        browserVidanet = null;
+    }
 }
 
 async function procesarPagoVidanet(datos) {
@@ -647,24 +669,26 @@ async function procesarPagoVidanet(datos) {
 // ==============================================================================
 
 async function iniciarServicios() {
+    if (browserServicios && browserServicios.isConnected()) return;
     console.log("🚀 [SERVICIOS] Iniciando Motor...");
-    browserServicios = await puppeteer.launch({ 
-        headless: "new", 
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--window-size=1920,1080'] 
-    });
-    pageServicios = await browserServicios.newPage();
-    await pageServicios.setRequestInterception(true);
-    pageServicios.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
-    
-    await pageServicios.goto(CONFIG_ICARO.urlLogin, {waitUntil:'networkidle2'});
-    if(await pageServicios.$(CONFIG_ICARO.selUser)) {
-        await pageServicios.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
-        await pageServicios.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
-        await pageServicios.evaluate(() => {
-            document.querySelectorAll('span').forEach(s => { if(s.innerText.includes('Login')) s.click(); });
-        });
-        await pageServicios.waitForNavigation({waitUntil:'networkidle2'});
-        console.log("✅ [SERVICIOS] Login OK.");
+    try {
+        if(browserServicios) try{ await browserServicios.close(); }catch(e){}
+        browserServicios = await puppeteer.launch({ headless: "new", defaultViewport: null, args: LAUNCH_ARGS });
+        pageServicios = await browserServicios.newPage();
+        await pageServicios.goto(CONFIG_ICARO.urlLogin, {waitUntil:'networkidle2', timeout: 60000});
+        
+        if(await pageServicios.$(CONFIG_ICARO.selUser)) {
+            await pageServicios.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
+            await pageServicios.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
+            await pageServicios.evaluate(() => {
+                document.querySelectorAll('span').forEach(s => { if(s.innerText.includes('Login')) s.click(); });
+            });
+            await pageServicios.waitForNavigation({waitUntil:'networkidle2', timeout: 60000});
+            console.log("✅ [SERVICIOS] Login OK.");
+        }
+    } catch(e) {
+        console.error("❌ Error iniciando Servicios:", e.message);
+        browserServicios = null;
     }
 }
 
@@ -881,21 +905,26 @@ async function buscarClienteServicios(idBusqueda) {
 // ==============================================================================
 
 async function iniciarFinanzas() {
+    if (browserFinanzas && browserFinanzas.isConnected()) return;
     console.log("🚀 [FINANZAS] Iniciando Motor...");
-    browserFinanzas = await puppeteer.launch({ 
-        headless: "new", 
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--start-maximized'] 
-    });
-    pageFinanzas = await browserFinanzas.newPage();
-    await pageFinanzas.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2' });
-    if(await pageFinanzas.$(CONFIG_ICARO.selUser)) {
-        await pageFinanzas.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
-        await pageFinanzas.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
-        await pageFinanzas.evaluate(() => {
-            document.querySelectorAll('span').forEach(s => { if(s.innerText.includes('Login')) s.click(); });
-        });
-        await pageFinanzas.waitForNavigation({ waitUntil: 'networkidle2' });
-        console.log("✅ [FINANZAS] Login OK.");
+    try {
+        if(browserFinanzas) try{ await browserFinanzas.close(); }catch(e){}
+        browserFinanzas = await puppeteer.launch({ headless: "new", defaultViewport: null, args: LAUNCH_ARGS });
+        pageFinanzas = await browserFinanzas.newPage();
+        await pageFinanzas.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2', timeout: 60000 });
+        
+        if(await pageFinanzas.$(CONFIG_ICARO.selUser)) {
+            await pageFinanzas.type(CONFIG_ICARO.selUser, CONFIG_ICARO.user);
+            await pageFinanzas.type(CONFIG_ICARO.selPass, CONFIG_ICARO.pass);
+            await pageFinanzas.evaluate(() => {
+                document.querySelectorAll('span').forEach(s => { if(s.innerText.includes('Login')) s.click(); });
+            });
+            await pageFinanzas.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
+            console.log("✅ [FINANZAS] Login OK.");
+        }
+    } catch(e) {
+        console.error("❌ Error iniciando Finanzas:", e.message);
+        browserFinanzas = null;
     }
 }
 
@@ -1138,4 +1167,23 @@ app.listen(PORT, async () => {
         await iniciarServicios();
         await iniciarFinanzas();
     }, 900000);
+
+    // MONITOR DE RAM (Pégalo antes de cerrar el app.listen)
+    setInterval(() => {
+        const used = process.memoryUsage().rss / 1024 / 1024;
+        console.log(`📊 RAM Usada: ${Math.round(used * 100) / 100} MB`);
+    }, 30000);
+
+});
+
+// ==============================================================================
+// 8. ESCUDO DE PROTECCIÓN (PARA QUE NO SE CAIGA EL SERVER)
+// ==============================================================================
+
+process.on('uncaughtException', (err) => {
+    console.error('🔥 [CRITICAL] Error no capturado (Server sigue vivo):', err.message);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('⚠️ [WARNING] Promesa rechazada sin manejo:', reason instanceof Error ? reason.message : reason);
 });
