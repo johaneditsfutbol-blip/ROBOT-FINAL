@@ -1,3 +1,5 @@
+process.env.TZ = 'America/Caracas';
+
 const express = require('express');
 const puppeteer = require('puppeteer');
 const fs = require('fs');
@@ -595,82 +597,62 @@ async function registrarPagoWizard(idCliente, datos) {
         await clickPorTexto(wFrame, 'Próximo'); 
         await esperar(3000);
 
-// --- PASO 4: MODO NUCLEAR ---
-        console.log("   4️⃣ Paso 4: Imagen y Ejecución Blindada");
+// --- PASO 4: EL BLOQUEO DE SALIDA (FIX RAILWAY) ---
+        console.log("   4️⃣ Paso 4: Submit con 'Promise.all' (Obligatorio en Docker)");
         
-        // 1. Subir la imagen
         if(datos.rutaImagen) {
             await subirComprobante(wFrame, datos.rutaImagen);
-            // ESPERA CRÍTICA: A veces la imagen tarda en "asentarse" en el formulario
-            await esperar(2000); 
+            await esperar(3000); 
         }
 
-        // 2. TRUCO DE MAGIA: Click en la nada para validar campos
-        // Esto obliga a Icaro a reconocer que terminaste de escribir el monto/ref
+        // 1. Preparamos el terreno (Quitar foco y forzar modo insertar)
         await wFrame.evaluate(() => {
-            document.body.click(); 
-            document.querySelectorAll('input').forEach(i => i.blur());
+            document.activeElement.blur(); 
+            // FORZAMOS EL MODO 'INCLUIR' EN EL FORMULARIO OCULTO
+            const inputOp = document.querySelector('input[name="nmgp_opcao"]');
+            if(inputOp) inputOp.value = 'incluir';
         });
         await esperar(1000);
 
-        console.log("   💣 DETONANDO BOTÓN 'AGREGAR'...");
+        console.log("   🚀 EJECUTANDO SUBMIT SINCRONIZADO...");
 
-        // 3. CLICK POR ID (Más potente que por texto)
-        // Intentamos encontrar el botón por su ID real de programación (sc_b_ins...)
-        const clickRealizado = await wFrame.evaluate(() => {
-            // IDs comunes de botones "Insertar/Agregar" en ScriptCase (Icaro)
-            const idsProbables = ['sc_b_ins_t', 'sc_b_ins_b', 'sc_b_ins', 'id_sc_field_agregar'];
-            
-            for (const id of idsProbables) {
-                const btn = document.getElementById(id);
-                if (btn && btn.offsetParent !== null) { // Si existe y es visible
-                    btn.click();
-                    return `ID: ${id}`;
-                }
-            }
-            
-            // Si fallan los IDs, buscamos por texto a lo bruto
-            const botones = Array.from(document.querySelectorAll('a, button, span.scButton_default'));
-            const btnTexto = botones.find(b => b.innerText.trim().toUpperCase() === 'AGREGAR');
-            if (btnTexto) {
-                btnTexto.click();
-                return "TEXTO: AGREGAR";
-            }
-            return false;
-        });
-
-        if (clickRealizado) {
-            console.log(`   ✅ Click ejecutado vía: ${clickRealizado}`);
-        } else {
-            console.error("   ❌ NO SE PUDO DAR CLICK. (Revisa si el botón cambió de nombre)");
-        }
-
-        // 4. LA ESPERA DE LA VERDAD
-        // No cerramos hasta ver que el formulario se haya limpiado o recargado
-        console.log("   ⏳ Esperando respuesta del servidor...");
-        
+        // 2. EL CAMBIO CLAVE: Disparamos el envío Y esperamos la navegación AL MISMO TIEMPO.
+        // Esto evita que el script continúe si la red no ha respondido.
         try {
-            // Esperamos que aparezca un mensaje de éxito O que el formulario se recargue
-            // Si Icaro guarda bien, suele recargar el frame.
-            await page.waitForNetworkIdle({ idleTime: 1500, timeout: 15000 });
-        } catch(e) {
-            console.log("   ⚠️ NetworkIdle timeout (Icaro lento), pero seguimos.");
+            await Promise.all([
+                // Promesa A: Esperar a que la página haga algo (navegar o recargar)
+                wFrame.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
+                    .catch(e => console.log("   ⚠️ No hubo navegación clásica, pero seguimos.")),
+                
+                // Promesa B: La acción que provoca el envío (Submit directo del Formulario F1)
+                wFrame.evaluate(() => {
+                    if(document.F1) {
+                        document.F1.submit(); // Envío nativo (Infalible)
+                    } else {
+                        // Fallback: Click al botón si no hay F1
+                        const btn = document.getElementById('sc_b_ins_t') || document.getElementById('sc_b_ins_b');
+                        if(btn) btn.click();
+                    }
+                })
+            ]);
+        } catch (error) {
+            console.log("   ⚠️ Error en Promise.all (Normal si es AJAX):", error.message);
+            // Si falla la navegación, esperamos un NetworkIdle manual
+            await page.waitForNetworkIdle({ idleTime: 2000, timeout: 10000 }).catch(()=>{});
         }
 
-        // 5. FOTO DE EVIDENCIA FINAL
-        await page.screenshot({ path: `resultado_final_${datos.referencia}.png` });
-        console.log("   📸 FOTO FINAL TOMADA. (Reísala para ver si sale 'Agregado exitosamente')");
+        console.log("   ✅ Respuesta recibida.");
 
-        // SI NO CIERRAS AQUÍ, PUEDES VERLO CON TUS OJOS EN LOCAL
-        // await esperar(5000); // Descomenta esto si quieres verlo 5 segundos más antes de cerrar
+        // 3. FOTO FINAL OBLIGATORIA
+        await page.screenshot({ path: `final_railway_${datos.referencia}.png` });
+        
+        // DALE 2 SEGUNDOS DE GRACIA AL SERVIDOR ANTES DE MATAR EL PROCESO
+        await esperar(2000);
 
         await page.close();
 
-        // ===> WEBHOOK ÉXITO <===
-        console.log("   ✨ Notificando a BuilderBot...");
+        // Notificaciones
         await notificarBuilderBot(datos);
-
-        // ---> NOTIFICAR ÉXITO PUSH
         await gestionarNotificacionPush(idCliente, datos, true);
 
     } catch(e) {
