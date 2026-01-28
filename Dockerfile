@@ -1,57 +1,34 @@
-# Usamos Node 18 completo (no slim) que ya trae herramientas útiles
-FROM node:18
+# 1. Usamos la imagen OFICIAL de Puppeteer.
+# Ya trae Chrome instalado, optimizado y con las fuentes necesarias.
+# Esto reduce el tiempo de build de 20 minutos a 2 minutos.
+FROM ghcr.io/puppeteer/puppeteer:21.0.0
 
-# Instalar SOLO las librerías necesarias para correr Puppeteer
-# Esto es mucho más rápido que bajar Google Chrome Stable
-RUN apt-get update && apt-get install -y \
-    ca-certificates \
-    fonts-liberation \
-    libasound2 \
-    libatk-bridge2.0-0 \
-    libatk1.0-0 \
-    libc6 \
-    libcairo2 \
-    libcups2 \
-    libdbus-1-3 \
-    libexpat1 \
-    libfontconfig1 \
-    libgbm1 \
-    libgcc1 \
-    libglib2.0-0 \
-    libgtk-3-0 \
-    libnspr4 \
-    libnss3 \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libstdc++6 \
-    libx11-6 \
-    libx11-xcb1 \
-    libxcb1 \
-    libxcomposite1 \
-    libxcursor1 \
-    libxdamage1 \
-    libxext6 \
-    libxfixes3 \
-    libxi6 \
-    libxrandr2 \
-    libxrender1 \
-    libxss1 \
-    libxtst6 \
-    lsb-release \
-    wget \
-    xdg-utils \
-    && rm -rf /var/lib/apt/lists/*
+# 2. Configuración CRÍTICA de Entorno
+# - Saltamos la descarga de Chromium (ya lo tenemos).
+# - Apuntamos al Chrome real.
+# - FORZAMOS LA HORA DE VENEZUELA (Esto arregla el rechazo de Icaro).
+ENV PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true \
+    PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable \
+    TZ=America/Caracas
 
-WORKDIR /app
+# 3. Volvemos a root para configurar permisos
+USER root
 
-# Copiamos package.json primero para aprovechar la caché de Docker
+WORKDIR /usr/src/app
+
+# 4. Copiamos archivos
 COPY package*.json ./
 
-# Aquí Puppeteer descargará su propia versión optimizada de Chromium
+# 5. Instalamos dependencias ligeras (Express, etc)
 RUN npm install
 
-# Copiamos el resto del código
 COPY . .
+
+# 6. Permisos para el usuario de seguridad de Google
+RUN chown -R pptruser:pptruser /usr/src/app
+
+# 7. Volvemos al usuario seguro
+USER pptruser
 
 EXPOSE 3000
 
