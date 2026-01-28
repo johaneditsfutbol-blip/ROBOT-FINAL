@@ -423,7 +423,8 @@ async function iniciarRegistrador() {
         if(browserRegistrador) try{ await browserRegistrador.close(); }catch(e){}
         
         browserRegistrador = await puppeteer.launch({ 
-            headless: "new", 
+            headless: "new",
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
             // EL TRUCO: Forzamos el viewport AQUI, no solo en la pagina
             defaultViewport: { width: 1920, height: 1080 }, 
             args: LAUNCH_ARGS 
