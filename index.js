@@ -58,20 +58,17 @@ let pageFinanzas = null;
 const LAUNCH_ARGS = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage', // Vital para Railway
+    '--disable-dev-shm-usage',
     '--disable-gpu',
     '--no-first-run',
-    '--no-zygote',
-    // ------------------------------------------------------------
-    // 💀 PARCHES ANTI-CHROME-LIGERO 💀
-    // ------------------------------------------------------------
-    '--window-size=1920,1080',      // Fuerza resolución HD real
-    '--force-device-scale-factor=1', // Evita que Linux escale la interfaz
-    '--disable-features=IsolateOrigins,site-per-process', // CRÍTICO: Arregla iframes (Icaro) en entornos con poca RAM
-    '--disable-blink-features=AutomationControlled', // Esconde que es un robot
-    '--enable-features=NetworkService,NetworkServiceInProcess', // Mejora la red en Linux
-    '--lang=es-419', // Fuerza español latino
-    // ------------------------------------------------------------
+    '--no-zygote', // Ahorra memoria compartida
+    '--single-process', // ⚠️ VITAL: Obliga a Chrome a usar 1 solo proceso en vez de 4 por pestaña
+    '--renderer-process-limit=1', // Limita los hilos de renderizado
+    '--disable-extensions',
+    '--disable-audio-output', // Ahorra hilos de audio
+    '--hide-scrollbars',
+    '--window-size=1920,1080',
+    '--lang=es-419'
 ];
 
 // ==============================================================================
@@ -1288,37 +1285,44 @@ app.get('/', (req, res) => res.send("🤖 MEGA-ROBOT UNIFICADO ACTIVO"));
 app.listen(PORT, async () => {
     console.log(`\n🌍 MEGA-SERVIDOR ACTIVO EN PUERTO: ${PORT}`);
     
-    // Arranque Inicial de TODOS los motores
+    // ARRANQUE ESCALONADO (Uno por uno para no infartar al servidor)
+    console.log("⏳ Iniciando Registrador...");
     await iniciarRegistrador();
+    await esperar(5000); // Espera 5 segundos
+
+    console.log("⏳ Iniciando Vidanet...");
     await iniciarVidanet();
+    await esperar(5000);
+
+    // Si tu servidor es pequeño, considera NO iniciar estos dos si no los usas siempre
+    // O déjalos comentados si solo necesitas registrar pagos ahora mismo
+    console.log("⏳ Iniciando Servicios...");
     await iniciarServicios();
+    await esperar(5000);
+
+    console.log("⏳ Iniciando Finanzas...");
     await iniciarFinanzas();
 
-    // --- CICLOS DE MANTENIMIENTO INDEPENDIENTES ---
-
-    // 1. Registradores (Cada 5 min)
+    // MANTENIMIENTO DESFASADO
+    // (Para que no se reinicien todos juntos dentro de 15 min)
+    
+    // Grupo 1: Registradores (Cada 15 min)
     setInterval(async () => {
         console.log("\n♻️ [MANT] Reiniciando Registradores...");
         if (browserRegistrador) { try{await browserRegistrador.close();}catch(e){} browserRegistrador=null; }
         if (browserVidanet) { try{await browserVidanet.close();}catch(e){} browserVidanet=null; }
         await iniciarRegistrador();
         await iniciarVidanet();
-    }, 900000);
+    }, 900000); // 15 min
 
-    // 2. Servicios & Finanzas (Cada 10 min - Sincronizados para ahorrar recursos)
+    // Grupo 2: Extractores (Cada 20 min - DESFASADO para no chocar)
     setInterval(async () => {
         console.log("\n♻️ [MANT] Reiniciando Extractores...");
         if (browserServicios) { try{await browserServicios.close();}catch(e){} browserServicios=null; }
         if (browserFinanzas) { try{await browserFinanzas.close();}catch(e){} browserFinanzas=null; }
         await iniciarServicios();
         await iniciarFinanzas();
-    }, 900000);
-
-    // MONITOR DE RAM (Pégalo antes de cerrar el app.listen)
-    setInterval(() => {
-        const used = process.memoryUsage().rss / 1024 / 1024;
-        console.log(`📊 RAM Usada: ${Math.round(used * 100) / 100} MB`);
-    }, 30000);
+    }, 1200000); // 20 min (Diferente tiempo para que no choquen)
 
 });
 
