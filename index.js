@@ -1,3 +1,14 @@
+process.env.TZ = 'America/Caracas';
+
+const express = require('express');
+const puppeteer = require('puppeteer');
+const fs = require('fs');
+const https = require('https');
+const path = require('path');
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
 // --- INSPECTOR DE IP ---
 import https from 'https'; // O 'require' si no usas import
 
@@ -19,17 +30,6 @@ function mostrarMiIP() {
 
 mostrarMiIP();
 // -----------------------
-
-process.env.TZ = 'America/Caracas';
-
-const express = require('express');
-const puppeteer = require('puppeteer');
-const fs = require('fs');
-const https = require('https');
-const path = require('path');
-
-const app = express();
-const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
