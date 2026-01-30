@@ -6,6 +6,22 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 
+// --- INSPECTOR DE IP (Para Whitelist) ---
+function mostrarMiIP() {
+    console.log("🕵️ Buscando IP del Servidor...");
+    https.get('https://api.ipify.org', (resp) => {
+        let data = '';
+        resp.on('data', (chunk) => data += chunk);
+        resp.on('end', () => {
+            console.log("\n========================================");
+            console.log("🚨 ESTA ES LA IP PARA ICAROSOFT: " + data);
+            console.log("========================================");
+        });
+    }).on("error", (err) => console.log("Error IP: " + err.message));
+}
+mostrarMiIP();
+// ----------------------------------------
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -416,20 +432,19 @@ async function manipularDeudas(page, modo, idsObjetivo = []) {
 
 async function iniciarRegistrador() {
     if (browserRegistrador && browserRegistrador.isConnected()) return;
-    console.log("🚀 [REGISTRADOR] Iniciando Icaro...");
+    console.log("🚀 [RAILWAY] Iniciando Navegador Oculto...");
     try {
         if(browserRegistrador) try{ await browserRegistrador.close(); }catch(e){}
         
         browserRegistrador = await puppeteer.launch({ 
-            headless: "new",
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
-            // EL TRUCO: Forzamos el viewport AQUI, no solo en la pagina
-            defaultViewport: { width: 1920, height: 1080 }, 
-            args: LAUNCH_ARGS 
+            headless: "new", // <--- OBLIGATORIO EN NUBE: "new"
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(), // <--- OBLIGATORIO EN NUBE
+            defaultViewport: { width: 1920, height: 1080 }, // Definir tamaño fijo
+            args: LAUNCH_ARGS // Usando tus argumentos optimizados
         });
         
         pageRegistrador = await browserRegistrador.newPage();
-        // Aumentamos timeout a 60s
+        // ... (resto del código de login igual)
         await pageRegistrador.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2', timeout: 60000 });
         
         if (await pageRegistrador.$(CONFIG_ICARO.selUser)) {
@@ -439,7 +454,7 @@ async function iniciarRegistrador() {
                 document.querySelectorAll('span').forEach(s => { if(s.innerText.includes('Login')) s.click(); });
             });
             await pageRegistrador.waitForNavigation({ waitUntil: 'networkidle2', timeout: 60000 });
-            console.log("✅ [REGISTRADOR] Icaro Login OK.");
+            console.log("✅ [LOCAL] Login OK.");
         }
     } catch(e) {
         console.error("❌ Error iniciando Registrador:", e.message);
@@ -647,32 +662,48 @@ async function registrarPagoWizard(idCliente, datos) {
         });
         await esperar(1000);
 
-        console.log("   🚀 EJECUTANDO SUBMIT SINCRONIZADO...");
+        console.log(" 🚀 EJECUTANDO SUBMIT SINCRONIZADO...");
 
-        // 2. EL CAMBIO CLAVE: Disparamos el envío Y esperamos la navegación AL MISMO TIEMPO.
-        // Esto evita que el script continúe si la red no ha respondido.
-        try {
-            await Promise.all([
-                // Promesa A: Esperar a que la página haga algo (navegar o recargar)
-                wFrame.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 })
-                    .catch(e => console.log("   ⚠️ No hubo navegación clásica, pero seguimos.")),
-                
-                // Promesa B: La acción que provoca el envío (Submit directo del Formulario F1)
-                wFrame.evaluate(() => {
-                    if(document.F1) {
-                        document.F1.submit(); // Envío nativo (Infalible)
-                    } else {
-                        // Fallback: Click al botón si no hay F1
-                        const btn = document.getElementById('sc_b_ins_t') || document.getElementById('sc_b_ins_b');
-                        if(btn) btn.click();
-                    }
-                })
-            ]);
-        } catch (error) {
-            console.log("   ⚠️ Error en Promise.all (Normal si es AJAX):", error.message);
-            // Si falla la navegación, esperamos un NetworkIdle manual
-            await page.waitForNetworkIdle({ idleTime: 2000, timeout: 10000 }).catch(()=>{});
-        }
+        // ============================================================
+        // 🔥 INICIO DEL NUEVO CÓDIGO DE FUERZA BRUTA (MODO "AGREGAR")
+        // ============================================================
+        
+        await wFrame.evaluate(() => {
+            // ESTRATEGIA 1: La orden directa de ScriptCase para "Agregar"
+            // Esta es la función que ejecuta el botón internamente.
+            if (typeof nm_atualiza == 'function') {
+                console.log(">> Ejecutando orden interna: nm_atualiza('incluir')");
+                nm_atualiza('incluir'); 
+                return; // Si esto corre, no hacemos más nada
+            } 
+            
+            // ESTRATEGIA 2: Buscar el botón por su TEXTO exacto "Agregar" y forzar click
+            // Buscamos cualquier cosa que diga "Agregar" y le damos click() nativo de JS
+            const botones = Array.from(document.querySelectorAll('a, button, span, div, input[type="button"]'));
+            const botonAgregar = botones.find(el => 
+                el.innerText && el.innerText.trim().toUpperCase() === 'AGREGAR' && el.offsetParent !== null
+            );
+        
+            if (botonAgregar) {
+                console.log(">> Encontré botón visual 'Agregar', forzando click()...");
+                botonAgregar.click();
+            } 
+            
+            // ESTRATEGIA 3: Disparo al Formulario directo (Último recurso)
+            else if (document.F1) {
+                console.log(">> No vi botón, disparando formulario F1 modo 'incluir'...");
+                if(document.F1.nmgp_opcao) document.F1.nmgp_opcao.value = 'incluir'; 
+                document.F1.submit();
+            }
+        });
+        
+        // ESPERA DE SEGURIDAD (Para ver si funcionó)
+        console.log("⏳ Esperando 5 segundos a que Icaro reaccione...");
+        await esperar(5000); 
+
+        // ============================================================
+        // 🔥 FIN DEL NUEVO CÓDIGO
+        // ============================================================
 
         console.log("   ✅ Respuesta recibida.");
 
