@@ -58,17 +58,18 @@ let pageFinanzas = null;
 const LAUNCH_ARGS = [
     '--no-sandbox',
     '--disable-setuid-sandbox',
-    '--disable-dev-shm-usage',
+    '--disable-dev-shm-usage', // VITAL: Usa disco en vez de RAM compartida
+    '--disable-accelerated-2d-canvas', // Desactiva gráficos avanzados
     '--disable-gpu',
     '--no-first-run',
-    '--no-zygote', // Ahorra memoria compartida
-    '--single-process', // ⚠️ VITAL: Obliga a Chrome a usar 1 solo proceso en vez de 4 por pestaña
-    '--renderer-process-limit=1', // Limita los hilos de renderizado
+    '--no-zygote', // Ahorra un poco de RAM inicial
     '--disable-extensions',
-    '--disable-audio-output', // Ahorra hilos de audio
+    '--disable-audio-output', 
     '--hide-scrollbars',
     '--window-size=1920,1080',
     '--lang=es-419'
+    // ⚠️ ELIMINADO: '--single-process' (Causante del crash)
+    // ⚠️ ELIMINADO: '--renderer-process-limit=1' (Causante de lentitud extrema)
 ];
 
 // ==============================================================================
