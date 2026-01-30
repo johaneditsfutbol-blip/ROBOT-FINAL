@@ -1,3 +1,25 @@
+// --- INSPECTOR DE IP ---
+import https from 'https'; // O 'require' si no usas import
+
+function mostrarMiIP() {
+    console.log("🕵️ Buscando la IP del servidor...");
+    https.get('https://api.ipify.org', (resp) => {
+        let data = '';
+        resp.on('data', (chunk) => data += chunk);
+        resp.on('end', () => {
+            console.log("========================================");
+            console.log("🚨 ESTA ES LA IP PARA LA WHITELIST: 🚨");
+            console.log(`       ${data}       `);
+            console.log("========================================");
+        });
+    }).on("error", (err) => {
+        console.log("Error buscando IP: " + err.message);
+    });
+}
+
+mostrarMiIP();
+// -----------------------
+
 process.env.TZ = 'America/Caracas';
 
 const express = require('express');
