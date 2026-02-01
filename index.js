@@ -664,42 +664,56 @@ async function registrarPagoWizard(idCliente, datos) {
 
         console.log(" 🚀 EJECUTANDO SUBMIT SINCRONIZADO...");
 
-        // ============================================================
-        // 🔥 INICIO DEL NUEVO CÓDIGO DE FUERZA BRUTA (MODO "AGREGAR")
+// ============================================================
+        // 🔥 FUERZA BRUTA V3: "EL FRANCOTIRADOR" 🎯
         // ============================================================
         
+        console.log(" 🚀 INTENTANDO SUBMIT (PRIORIDAD: BOTONES VISUALES)...");
+
         await wFrame.evaluate(() => {
-            // ESTRATEGIA 1: La orden directa de ScriptCase para "Agregar"
-            // Esta es la función que ejecuta el botón internamente.
+            // Helper para limpiar texto (quita acentos y lo pone en minúscula)
+            const limpiar = (txt) => txt ? txt.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+
+            // 1. ESTRATEGIA PRINCIPAL: CLICK FÍSICO AL BOTÓN VISUAL
+            // Buscamos en TODOS los elementos clicables
+            const elementos = Array.from(document.querySelectorAll('a, button, span, div, input[type="button"], input[type="submit"]'));
+            
+            // Buscamos uno que CONTENGA la palabra "agregar" (aunque tenga signos raros)
+            const botonVisual = elementos.find(el => {
+                const texto = el.innerText || el.value || ""; // Texto o valor del input
+                const textoLimpio = limpiar(texto);
+                // Si dice "agregar" Y es visible en pantalla
+                return textoLimpio.includes("agregar") && el.offsetParent !== null;
+            });
+
+            if (botonVisual) {
+                console.log(">> 🖱️ Encontré botón visual (con texto/signos), haciendo CLICK...");
+                botonVisual.click();
+                return; // ¡Misión cumplida! Salimos.
+            }
+
+            // 2. ESTRATEGIA SECUNDARIA: LA ORDEN INTERNA
+            // Solo si no encontró el botón, usamos el truco del código
             if (typeof nm_atualiza == 'function') {
-                console.log(">> Ejecutando orden interna: nm_atualiza('incluir')");
+                console.log(">> Botón no visto. Ejecutando comando interno: nm_atualiza('incluir')...");
                 nm_atualiza('incluir'); 
-                return; // Si esto corre, no hacemos más nada
-            } 
-            
-            // ESTRATEGIA 2: Buscar el botón por su TEXTO exacto "Agregar" y forzar click
-            // Buscamos cualquier cosa que diga "Agregar" y le damos click() nativo de JS
-            const botones = Array.from(document.querySelectorAll('a, button, span, div, input[type="button"]'));
-            const botonAgregar = botones.find(el => 
-                el.innerText && el.innerText.trim().toUpperCase() === 'AGREGAR' && el.offsetParent !== null
-            );
-        
-            if (botonAgregar) {
-                console.log(">> Encontré botón visual 'Agregar', forzando click()...");
-                botonAgregar.click();
-            } 
-            
-            // ESTRATEGIA 3: Disparo al Formulario directo (Último recurso)
-            else if (document.F1) {
-                console.log(">> No vi botón, disparando formulario F1 modo 'incluir'...");
+                return; 
+            }
+
+            // 3. ESTRATEGIA DE EMERGENCIA: FORMULARIO
+            if (document.F1) {
+                console.log(">> Nada funcionó. Enviando formulario F1 a la fuerza...");
                 if(document.F1.nmgp_opcao) document.F1.nmgp_opcao.value = 'incluir'; 
                 document.F1.submit();
             }
         });
         
-        // ESPERA DE SEGURIDAD (Para ver si funcionó)
-        console.log("⏳ Esperando 5 segundos a que Icaro reaccione...");
-        await esperar(5000); 
+        // 🛑 TIEMPO EXTENDIDO OBLIGATORIO 🛑
+        // Al subir foto, el servidor tarda. Si cortamos antes, falla.
+        console.log("⏳ Esperando 20 segundos a que Icaro suba la foto y procese...");
+        await esperar(20000); 
+
+        // ============================================================
 
         // ============================================================
         // 🔥 FIN DEL NUEVO CÓDIGO
