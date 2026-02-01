@@ -1352,30 +1352,32 @@ app.listen(PORT, async () => {
     // ============================================================
     console.log("🧹 [SISTEMA] Ejecutando limpieza preventiva de RAM...");
     try {
-        // Matamos cualquier Chrome que haya quedado colgado de deploys anteriores
+        // Usamos catch para que si falla el pkill (porque no hay memoria), 
+        // no crashee el node, aunque el riesgo de EAGAIN persiste.
         require('child_process').execSync('pkill -f chrome || true');
         require('child_process').execSync('pkill -f chromium || true');
-    } catch (e) { 
-        // Si no había nada que matar, no importa. Seguimos.
-    }
-    await esperar(3000); // Damos 3 segundos al sistema para liberar la RAM
+    } catch (e) { console.log("   (Limpieza inicial saltada o fallida)"); }
+    
+    // 🛑 CAMBIO CRÍTICO: Aumentamos de 3s a 10s.
+    // Linux necesita tiempo para liberar los IDs de proceso (PIDs).
+    console.log("⏳ Esperando 10 segundos a que el Kernel libere recursos...");
+    await esperar(10000); 
 
     // ============================================================
     // 2. ARRANQUE DE MOTORES (SECUENCIAL OBLIGATORIO)
     // ============================================================
-    // Los iniciamos uno por uno. Si intentamos los 4 a la vez, el CPU explota.
     
     console.log("⏳ [1/4] Encendiendo Registrador (Icaro)...");
     await iniciarRegistrador();
-    await esperar(6000); 
+    await esperar(8000);  // Aumentado a 8s
 
     console.log("⏳ [2/4] Encendiendo Vidanet...");
     await iniciarVidanet();
-    await esperar(6000);
+    await esperar(8000);  // Aumentado a 8s
 
     console.log("⏳ [3/4] Encendiendo Servicios...");
     await iniciarServicios();
-    await esperar(6000);
+    await esperar(8000);  // Aumentado a 8s
 
     console.log("⏳ [4/4] Encendiendo Finanzas...");
     await iniciarFinanzas();
@@ -1385,44 +1387,47 @@ app.listen(PORT, async () => {
     // ============================================================
     // 3. MANTENIMIENTO MAESTRO "LA PURGA" (CADA 20 MIN)
     // ============================================================
-    // En lugar de reiniciar por partes, matamos todo y volvemos a encender.
-    // Esto garantiza que la RAM siempre vuelva a 0% de uso cada ciclo.
     setInterval(async () => {
         console.log("\n♻️ [MANT] INICIANDO CICLO DE LIMPIEZA PROFUNDA (20 min)...");
 
-        // A. LA GUILLOTINA: Matar procesos a nivel de sistema operativo
+        // A. LA GUILLOTINA
         try {
             require('child_process').execSync('pkill -f chrome || true');
             require('child_process').execSync('pkill -f chromium || true');
             console.log("   ☠️  Todos los navegadores cerrados forzosamente.");
-        } catch(e) { console.log("   (Error menor en limpieza: " + e.message + ")"); }
+        } catch(e) { 
+            console.log("   ⚠️ Alerta: El sistema estaba muy lleno y el pkill falló. Reintentando...");
+            // Si falla, esperamos 5 segundos y probamos de nuevo (Doble Tap)
+            await esperar(5000);
+            try { require('child_process').execSync('pkill -f chrome || true'); } catch(e){}
+        }
 
         // B. RESETEO DE VARIABLES
-        // Le decimos al código que sus navegadores murieron
         browserRegistrador = null;
         browserVidanet = null;
         browserServicios = null;
         browserFinanzas = null;
 
-        // C. RE-ARRANQUE AUTOMÁTICO (COMO TÚ LO PEDISTE)
-        // No esperamos solicitud. Los levantamos de inmediato.
-        console.log("   🔄 Re-encendiendo motores para mantener disponibilidad...");
+        // C. RE-ARRANQUE AUTOMÁTICO
+        console.log("   🔄 Re-encendiendo motores (Con pausa de seguridad)...");
         
-        await esperar(2000);
+        // 🛑 CAMBIO CRÍTICO: Espera larga antes de volver a prender
+        await esperar(15000); // 15 Segundos de silencio absoluto para enfriar el CPU
+
         await iniciarRegistrador(); 
-        await esperar(5000);
+        await esperar(8000);
         
         await iniciarVidanet();     
-        await esperar(5000);
+        await esperar(8000);
         
         await iniciarServicios();   
-        await esperar(5000);
+        await esperar(8000);
         
         await iniciarFinanzas();
         
-        console.log("   ✨ Mantenimiento finalizado. Todo activo y con RAM fresca.");
+        console.log("   ✨ Mantenimiento finalizado. Todo activo.");
 
-    }, 1200000); // 1200000 ms = 20 Minutos
+    }, 1200000); // 20 Minutos
 });
 
 // ==============================================================================
