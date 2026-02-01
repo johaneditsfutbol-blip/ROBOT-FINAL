@@ -1316,46 +1316,83 @@ app.get('/', (req, res) => res.send("🤖 MEGA-ROBOT UNIFICADO ACTIVO"));
 
 app.listen(PORT, async () => {
     console.log(`\n🌍 MEGA-SERVIDOR ACTIVO EN PUERTO: ${PORT}`);
+
+    // ============================================================
+    // 1. FASE DE LIMPIEZA INICIAL (MATAR ZOMBIES)
+    // ============================================================
+    console.log("🧹 [SISTEMA] Ejecutando limpieza preventiva de RAM...");
+    try {
+        // Matamos cualquier Chrome que haya quedado colgado de deploys anteriores
+        require('child_process').execSync('pkill -f chrome || true');
+        require('child_process').execSync('pkill -f chromium || true');
+    } catch (e) { 
+        // Si no había nada que matar, no importa. Seguimos.
+    }
+    await esperar(3000); // Damos 3 segundos al sistema para liberar la RAM
+
+    // ============================================================
+    // 2. ARRANQUE DE MOTORES (SECUENCIAL OBLIGATORIO)
+    // ============================================================
+    // Los iniciamos uno por uno. Si intentamos los 4 a la vez, el CPU explota.
     
-    // ARRANQUE ESCALONADO (Uno por uno para no infartar al servidor)
-    console.log("⏳ Iniciando Registrador...");
+    console.log("⏳ [1/4] Encendiendo Registrador (Icaro)...");
     await iniciarRegistrador();
-    await esperar(5000); // Espera 5 segundos
+    await esperar(6000); 
 
-    console.log("⏳ Iniciando Vidanet...");
+    console.log("⏳ [2/4] Encendiendo Vidanet...");
     await iniciarVidanet();
-    await esperar(5000);
+    await esperar(6000);
 
-    // Si tu servidor es pequeño, considera NO iniciar estos dos si no los usas siempre
-    // O déjalos comentados si solo necesitas registrar pagos ahora mismo
-    console.log("⏳ Iniciando Servicios...");
+    console.log("⏳ [3/4] Encendiendo Servicios...");
     await iniciarServicios();
-    await esperar(5000);
+    await esperar(6000);
 
-    console.log("⏳ Iniciando Finanzas...");
+    console.log("⏳ [4/4] Encendiendo Finanzas...");
     await iniciarFinanzas();
-
-    // MANTENIMIENTO DESFASADO
-    // (Para que no se reinicien todos juntos dentro de 15 min)
     
-    // Grupo 1: Registradores (Cada 15 min)
-    setInterval(async () => {
-        console.log("\n♻️ [MANT] Reiniciando Registradores...");
-        if (browserRegistrador) { try{await browserRegistrador.close();}catch(e){} browserRegistrador=null; }
-        if (browserVidanet) { try{await browserVidanet.close();}catch(e){} browserVidanet=null; }
-        await iniciarRegistrador();
-        await iniciarVidanet();
-    }, 900000); // 15 min
+    console.log("\n✅ SISTEMA AL 100%: Los 4 Robots están listos y operando.");
 
-    // Grupo 2: Extractores (Cada 20 min - DESFASADO para no chocar)
+    // ============================================================
+    // 3. MANTENIMIENTO MAESTRO "LA PURGA" (CADA 20 MIN)
+    // ============================================================
+    // En lugar de reiniciar por partes, matamos todo y volvemos a encender.
+    // Esto garantiza que la RAM siempre vuelva a 0% de uso cada ciclo.
     setInterval(async () => {
-        console.log("\n♻️ [MANT] Reiniciando Extractores...");
-        if (browserServicios) { try{await browserServicios.close();}catch(e){} browserServicios=null; }
-        if (browserFinanzas) { try{await browserFinanzas.close();}catch(e){} browserFinanzas=null; }
-        await iniciarServicios();
+        console.log("\n♻️ [MANT] INICIANDO CICLO DE LIMPIEZA PROFUNDA (20 min)...");
+
+        // A. LA GUILLOTINA: Matar procesos a nivel de sistema operativo
+        try {
+            require('child_process').execSync('pkill -f chrome || true');
+            require('child_process').execSync('pkill -f chromium || true');
+            console.log("   ☠️  Todos los navegadores cerrados forzosamente.");
+        } catch(e) { console.log("   (Error menor en limpieza: " + e.message + ")"); }
+
+        // B. RESETEO DE VARIABLES
+        // Le decimos al código que sus navegadores murieron
+        browserRegistrador = null;
+        browserVidanet = null;
+        browserServicios = null;
+        browserFinanzas = null;
+
+        // C. RE-ARRANQUE AUTOMÁTICO (COMO TÚ LO PEDISTE)
+        // No esperamos solicitud. Los levantamos de inmediato.
+        console.log("   🔄 Re-encendiendo motores para mantener disponibilidad...");
+        
+        await esperar(2000);
+        await iniciarRegistrador(); 
+        await esperar(5000);
+        
+        await iniciarVidanet();     
+        await esperar(5000);
+        
+        await iniciarServicios();   
+        await esperar(5000);
+        
         await iniciarFinanzas();
-    }, 1200000); // 20 min (Diferente tiempo para que no choquen)
+        
+        console.log("   ✨ Mantenimiento finalizado. Todo activo y con RAM fresca.");
 
+    }, 1200000); // 1200000 ms = 20 Minutos
 });
 
 // ==============================================================================
