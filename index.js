@@ -467,6 +467,10 @@ async function registrarPagoWizard(idCliente, datos) {
     console.log(`\n🤖 --- [ICARO] PAGO ID: ${idCliente} ---`);
     
     const page = await browserRegistrador.newPage();
+    // --- 🔥 ESTO ES NUEVO: TELEPATÍA DE LOGS 🔥 ---
+    // Nos permite ver qué está pasando DENTRO de la página web
+    page.on('console', msg => console.log('PAGE LOG:', msg.text()));
+    // ----------------------------------------------
     page.on('dialog', async d => {
         console.log(`      👀 ALERTA: "${d.message()}" -> ACEPTADA.`);
         await d.accept(); 
@@ -665,58 +669,70 @@ async function registrarPagoWizard(idCliente, datos) {
         console.log(" 🚀 EJECUTANDO SUBMIT SINCRONIZADO...");
 
 // ============================================================
-        // 🔥 FUERZA BRUTA V3: "EL FRANCOTIRADOR" 🎯
+        // 🔥 FUERZA BRUTA V4: "EL BOMBARDEO" 💣
         // ============================================================
         
-        console.log(" 🚀 INTENTANDO SUBMIT (PRIORIDAD: BOTONES VISUALES)...");
+        console.log(" 🚀 INTENTANDO SUBMIT (MODO DEDO PESADO)...");
 
-        await wFrame.evaluate(() => {
-            // Helper para limpiar texto (quita acentos y lo pone en minúscula)
+        await wFrame.evaluate(async () => {
+            // Helper para limpiar texto
             const limpiar = (txt) => txt ? txt.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
 
-            // 1. ESTRATEGIA PRINCIPAL: CLICK FÍSICO AL BOTÓN VISUAL
-            // Buscamos en TODOS los elementos clicables
-            const elementos = Array.from(document.querySelectorAll('a, button, span, div, input[type="button"], input[type="submit"]'));
+            // 1. BUSCAR TODOS LOS BOTONES POSIBLES
+            // Incluimos 'td' y 'span' porque a veces ScriptCase usa celdas como botones
+            const elementos = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], span.scButton_default'));
             
-            // Buscamos uno que CONTENGA la palabra "agregar" (aunque tenga signos raros)
+            // Filtramos el que diga "agregar"
             const botonVisual = elementos.find(el => {
-                const texto = el.innerText || el.value || ""; // Texto o valor del input
-                const textoLimpio = limpiar(texto);
-                // Si dice "agregar" Y es visible en pantalla
-                return textoLimpio.includes("agregar") && el.offsetParent !== null;
+                const texto = el.innerText || el.value || "";
+                // Verifica que diga "agregar" Y que sea visible
+                return limpiar(texto).includes("agregar") && el.offsetParent !== null;
             });
 
             if (botonVisual) {
-                console.log(">> 🖱️ Encontré botón visual (con texto/signos), haciendo CLICK...");
+                console.log("PAGE LOG: >> 🎯 ¡BOTÓN ENCONTRADO! ID: " + (botonVisual.id || 'Sin ID'));
+                
+                // A. PINTARLO DE ROJO (Para verlo en la foto si falla)
+                botonVisual.style.border = "5px solid red";
+                botonVisual.style.backgroundColor = "yellow";
+
+                // B. DARLE FOCO
+                botonVisual.focus();
+
+                // C. BOMBARDEO DE CLICS (3 intentos)
+                // A veces el primer clic solo "despierta" el botón
+                console.log("PAGE LOG: >> Click 1...");
                 botonVisual.click();
-                return; // ¡Misión cumplida! Salimos.
-            }
+                
+                // Un pequeño delay sucio usando loops (porque await sleep no va bien aquí dentro sin configs extra)
+                const start = Date.now(); while (Date.now() - start < 500); 
 
-            // 2. ESTRATEGIA SECUNDARIA: LA ORDEN INTERNA
-            // Solo si no encontró el botón, usamos el truco del código
-            if (typeof nm_atualiza == 'function') {
-                console.log(">> Botón no visto. Ejecutando comando interno: nm_atualiza('incluir')...");
-                nm_atualiza('incluir'); 
-                return; 
-            }
-
-            // 3. ESTRATEGIA DE EMERGENCIA: FORMULARIO
-            if (document.F1) {
-                console.log(">> Nada funcionó. Enviando formulario F1 a la fuerza...");
-                if(document.F1.nmgp_opcao) document.F1.nmgp_opcao.value = 'incluir'; 
-                document.F1.submit();
+                console.log("PAGE LOG: >> Click 2...");
+                botonVisual.click();
+            } else {
+                console.log("PAGE LOG: >> ❌ SOCORRO: No veo ningún botón que diga 'Agregar'");
+                
+                // PLAN B: INTENTO POR CÓDIGO SI FALLA LO VISUAL
+                if (typeof nm_atualiza == 'function') {
+                    console.log("PAGE LOG: >> Intentando inyección nm_atualiza('incluir')...");
+                    nm_atualiza('incluir');
+                } else if (document.F1) {
+                    console.log("PAGE LOG: >> Intentando submit F1...");
+                    if(document.F1.nmgp_opcao) document.F1.nmgp_opcao.value = 'incluir'; 
+                    document.F1.submit();
+                }
             }
         });
         
-        // 🛑 TIEMPO EXTENDIDO OBLIGATORIO 🛑
-        // Al subir foto, el servidor tarda. Si cortamos antes, falla.
-        console.log("⏳ Esperando 20 segundos a que Icaro suba la foto y procese...");
-        await esperar(20000); 
+        // D. AYUDA EXTERNA CON TECLADO (Por si el click de JS fue bloqueado)
+        // Presionamos ENTER por si el foco quedó en el botón
+        try {
+            await page.keyboard.press('Enter');
+        } catch(e) {}
 
-        // ============================================================
+        console.log("⏳ Esperando 10 segundos a que procese...");
+        await esperar(10000); 
 
-        // ============================================================
-        // 🔥 FIN DEL NUEVO CÓDIGO
         // ============================================================
 
         console.log("   ✅ Respuesta recibida.");
