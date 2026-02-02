@@ -1348,86 +1348,96 @@ app.listen(PORT, async () => {
     console.log(`\n🌍 MEGA-SERVIDOR ACTIVO EN PUERTO: ${PORT}`);
 
     // ============================================================
-    // 1. FASE DE LIMPIEZA INICIAL (MATAR ZOMBIES)
+    // 1. LIMPIEZA INICIAL (SOLO AL ARRANCAR)
     // ============================================================
-    console.log("🧹 [SISTEMA] Ejecutando limpieza preventiva de RAM...");
+    // Aquí SI podemos usar pkill porque acabamos de prender el server
+    // y no hay nada importante corriendo aún.
+    console.log("🧹 [SISTEMA] Limpiando memoria para arranque fresco...");
     try {
-        // Usamos catch para que si falla el pkill (porque no hay memoria), 
-        // no crashee el node, aunque el riesgo de EAGAIN persiste.
         require('child_process').execSync('pkill -f chrome || true');
         require('child_process').execSync('pkill -f chromium || true');
-    } catch (e) { console.log("   (Limpieza inicial saltada o fallida)"); }
+    } catch (e) {}
     
-    // 🛑 CAMBIO CRÍTICO: Aumentamos de 3s a 10s.
-    // Linux necesita tiempo para liberar los IDs de proceso (PIDs).
-    console.log("⏳ Esperando 10 segundos a que el Kernel libere recursos...");
-    await esperar(10000); 
+    console.log("⏳ Esperando 5 segundos a que el Kernel libere recursos...");
+    await esperar(5000); 
 
     // ============================================================
-    // 2. ARRANQUE DE MOTORES (SECUENCIAL OBLIGATORIO)
+    // 2. ARRANQUE INICIAL (SECUENCIAL)
     // ============================================================
+    // Encendemos todos la primera vez, con pausas para no ahogar el CPU.
     
     console.log("⏳ [1/4] Encendiendo Registrador (Icaro)...");
     await iniciarRegistrador();
-    await esperar(8000);  // Aumentado a 8s
+    await esperar(5000); 
 
     console.log("⏳ [2/4] Encendiendo Vidanet...");
     await iniciarVidanet();
-    await esperar(8000);  // Aumentado a 8s
+    await esperar(5000); 
 
     console.log("⏳ [3/4] Encendiendo Servicios...");
     await iniciarServicios();
-    await esperar(8000);  // Aumentado a 8s
+    await esperar(5000); 
 
     console.log("⏳ [4/4] Encendiendo Finanzas...");
     await iniciarFinanzas();
     
-    console.log("\n✅ SISTEMA AL 100%: Los 4 Robots están listos y operando.");
+    console.log("\n✅ SISTEMA AL 100%: Todos los robots operando.");
 
     // ============================================================
-    // 3. MANTENIMIENTO MAESTRO "LA PURGA" (CADA 20 MIN)
+    // 3. MANTENIMIENTO QUIRÚRGICO (UNO POR UNO)
     // ============================================================
+    // Reiniciamos cada uno en momentos diferentes. Nunca se cruzan.
+    // Usamos .close() para cerrar solo ESE navegador y no matar a los demás.
+
+    // A. Mantenimiento Registrador (Cada 25 Minutos)
     setInterval(async () => {
-        console.log("\n♻️ [MANT] INICIANDO CICLO DE LIMPIEZA PROFUNDA (20 min)...");
-
-        // A. LA GUILLOTINA
-        try {
-            require('child_process').execSync('pkill -f chrome || true');
-            require('child_process').execSync('pkill -f chromium || true');
-            console.log("   ☠️  Todos los navegadores cerrados forzosamente.");
-        } catch(e) { 
-            console.log("   ⚠️ Alerta: El sistema estaba muy lleno y el pkill falló. Reintentando...");
-            // Si falla, esperamos 5 segundos y probamos de nuevo (Doble Tap)
-            await esperar(5000);
-            try { require('child_process').execSync('pkill -f chrome || true'); } catch(e){}
+        console.log("\n♻️ [MANT-1] Reiniciando SOLO Registrador...");
+        if (browserRegistrador) {
+            try { await browserRegistrador.close(); } catch(e) {}
+            browserRegistrador = null;
         }
+        await esperar(5000); // Pausa para liberar RAM
+        await iniciarRegistrador();
+        console.log("   ✅ Registrador refrescado.");
+    }, 1500000); // 25 min
 
-        // B. RESETEO DE VARIABLES
-        browserRegistrador = null;
-        browserVidanet = null;
-        browserServicios = null;
-        browserFinanzas = null;
+    // B. Mantenimiento Vidanet (Cada 28 Minutos - Desfasado)
+    setInterval(async () => {
+        console.log("\n♻️ [MANT-2] Reiniciando SOLO Vidanet...");
+        if (browserVidanet) {
+            try { await browserVidanet.close(); } catch(e) {}
+            browserVidanet = null;
+        }
+        await esperar(5000);
+        await iniciarVidanet();
+        console.log("   ✅ Vidanet refrescado.");
+    }, 1680000); // 28 min
 
-        // C. RE-ARRANQUE AUTOMÁTICO
-        console.log("   🔄 Re-encendiendo motores (Con pausa de seguridad)...");
-        
-        // 🛑 CAMBIO CRÍTICO: Espera larga antes de volver a prender
-        await esperar(15000); // 15 Segundos de silencio absoluto para enfriar el CPU
+    // C. Mantenimiento Servicios (Cada 31 Minutos - Desfasado)
+    setInterval(async () => {
+        console.log("\n♻️ [MANT-3] Reiniciando SOLO Servicios...");
+        if (browserServicios) {
+            try { await browserServicios.close(); } catch(e) {}
+            browserServicios = null;
+        }
+        await esperar(5000);
+        await iniciarServicios();
+        console.log("   ✅ Servicios refrescado.");
+    }, 1860000); // 31 min
 
-        await iniciarRegistrador(); 
-        await esperar(8000);
-        
-        await iniciarVidanet();     
-        await esperar(8000);
-        
-        await iniciarServicios();   
-        await esperar(8000);
-        
+    // D. Mantenimiento Finanzas (Cada 34 Minutos - Desfasado)
+    setInterval(async () => {
+        console.log("\n♻️ [MANT-4] Reiniciando SOLO Finanzas...");
+        if (browserFinanzas) {
+            try { await browserFinanzas.close(); } catch(e) {}
+            browserFinanzas = null;
+        }
+        await esperar(5000);
         await iniciarFinanzas();
-        
-        console.log("   ✨ Mantenimiento finalizado. Todo activo.");
+        console.log("   ✅ Finanzas refrescado.");
+    }, 2040000); // 34 min
 
-    }, 1200000); // 20 Minutos
+    // (HEMOS ELIMINADO LA SECCIÓN 4 PARA EVITAR MATAR TODOS LOS ROBOTS)
 });
 
 // ==============================================================================
