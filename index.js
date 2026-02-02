@@ -1338,6 +1338,23 @@ app.get('/health', (req, res) => {
 
 app.get('/', (req, res) => res.send("🤖 MEGA-ROBOT UNIFICADO ACTIVO"));
 
+// --- NUEVA HERRAMIENTA: EL MATADOR DE PROCESOS ---
+async function asesinarBrowser(browserInstancia) {
+    if (!browserInstancia) return;
+    try {
+        const pid = browserInstancia.process() ? browserInstancia.process().pid : null;
+        
+        // 1. Intentamos cierre amable primero
+        await browserInstancia.close().catch(() => {}); 
+        
+        // 2. Si tenía ID, le mandamos la orden de muerte directa al Kernel
+        if (pid) {
+            console.log(`   ☠️ Rematando proceso PID: ${pid} (Kill Force)`);
+            try { process.kill(pid, 'SIGKILL'); } catch(e) {}
+        }
+    } catch (e) { console.log("   (Error menor cerrando browser)"); }
+}
+
 // ==============================================================================
 // 7. ARRANQUE Y MANTENIMIENTO
 // ==============================================================================
@@ -1348,22 +1365,18 @@ app.listen(PORT, async () => {
     // ============================================================
     // 1. LIMPIEZA INICIAL (SOLO AL ARRANCAR)
     // ============================================================
-    // Aquí SI podemos usar pkill porque acabamos de prender el server
-    // y no hay nada importante corriendo aún.
     console.log("🧹 [SISTEMA] Limpiando memoria para arranque fresco...");
     try {
         require('child_process').execSync('pkill -f chrome || true');
         require('child_process').execSync('pkill -f chromium || true');
     } catch (e) {}
     
-    console.log("⏳ Esperando 5 segundos a que el Kernel libere recursos...");
+    console.log("⏳ Esperando 5 segundos...");
     await esperar(5000); 
 
     // ============================================================
-    // 2. ARRANQUE INICIAL (SECUENCIAL)
+    // 2. ARRANQUE INICIAL
     // ============================================================
-    // Encendemos todos la primera vez, con pausas para no ahogar el CPU.
-    
     console.log("⏳ [1/4] Encendiendo Registrador (Icaro)...");
     await iniciarRegistrador();
     await esperar(5000); 
@@ -1382,60 +1395,53 @@ app.listen(PORT, async () => {
     console.log("\n✅ SISTEMA AL 100%: Todos los robots operando.");
 
     // ============================================================
-    // 3. MANTENIMIENTO QUIRÚRGICO (UNO POR UNO)
+    // 3. MANTENIMIENTO QUIRÚRGICO (Matando por PID)
     // ============================================================
-    // Reiniciamos cada uno en momentos diferentes. Nunca se cruzan.
-    // Usamos .close() para cerrar solo ESE navegador y no matar a los demás.
 
-    // A. Mantenimiento Registrador (Cada 25 Minutos)
+    // A. Registrador (Cada 25 min)
     setInterval(async () => {
         console.log("\n♻️ [MANT-1] Reiniciando SOLO Registrador...");
-        if (browserRegistrador) {
-            try { await browserRegistrador.close(); } catch(e) {}
-            browserRegistrador = null;
-        }
-        await esperar(5000); // Pausa para liberar RAM
+        // USAMOS LA NUEVA FUNCIÓN ASESINA
+        await asesinarBrowser(browserRegistrador); 
+        browserRegistrador = null;
+        
+        await esperar(10000); // 10s de luto para liberar RAM
         await iniciarRegistrador();
         console.log("   ✅ Registrador refrescado.");
-    }, 1500000); // 25 min
+    }, 1500000);
 
-    // B. Mantenimiento Vidanet (Cada 28 Minutos - Desfasado)
+    // B. Vidanet (Cada 28 min)
     setInterval(async () => {
         console.log("\n♻️ [MANT-2] Reiniciando SOLO Vidanet...");
-        if (browserVidanet) {
-            try { await browserVidanet.close(); } catch(e) {}
-            browserVidanet = null;
-        }
-        await esperar(5000);
+        await asesinarBrowser(browserVidanet);
+        browserVidanet = null;
+        
+        await esperar(10000);
         await iniciarVidanet();
         console.log("   ✅ Vidanet refrescado.");
-    }, 1680000); // 28 min
+    }, 1680000);
 
-    // C. Mantenimiento Servicios (Cada 31 Minutos - Desfasado)
+    // C. Servicios (Cada 31 min)
     setInterval(async () => {
         console.log("\n♻️ [MANT-3] Reiniciando SOLO Servicios...");
-        if (browserServicios) {
-            try { await browserServicios.close(); } catch(e) {}
-            browserServicios = null;
-        }
-        await esperar(5000);
+        await asesinarBrowser(browserServicios);
+        browserServicios = null;
+        
+        await esperar(10000);
         await iniciarServicios();
         console.log("   ✅ Servicios refrescado.");
-    }, 1860000); // 31 min
+    }, 1860000);
 
-    // D. Mantenimiento Finanzas (Cada 34 Minutos - Desfasado)
+    // D. Finanzas (Cada 34 min)
     setInterval(async () => {
         console.log("\n♻️ [MANT-4] Reiniciando SOLO Finanzas...");
-        if (browserFinanzas) {
-            try { await browserFinanzas.close(); } catch(e) {}
-            browserFinanzas = null;
-        }
-        await esperar(5000);
+        await asesinarBrowser(browserFinanzas);
+        browserFinanzas = null;
+        
+        await esperar(10000);
         await iniciarFinanzas();
         console.log("   ✅ Finanzas refrescado.");
-    }, 2040000); // 34 min
-
-    // (HEMOS ELIMINADO LA SECCIÓN 4 PARA EVITAR MATAR TODOS LOS ROBOTS)
+    }, 2040000);
 });
 
 // ==============================================================================
