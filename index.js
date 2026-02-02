@@ -669,69 +669,67 @@ async function registrarPagoWizard(idCliente, datos) {
         console.log(" 🚀 EJECUTANDO SUBMIT SINCRONIZADO...");
 
 // ============================================================
-        // 🔥 FUERZA BRUTA V4: "EL BOMBARDEO" 💣
+        // 🔥 FUERZA BRUTA V5: "EL FRANCOTIRADOR DE IDs" 🎯
         // ============================================================
         
-        console.log(" 🚀 INTENTANDO SUBMIT (MODO DEDO PESADO)...");
+        console.log(" 🚀 INTENTANDO SUBMIT (ESTRATEGIA ID DIRECTO)...");
 
         await wFrame.evaluate(async () => {
-            // Helper para limpiar texto
-            const limpiar = (txt) => txt ? txt.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
-
-            // 1. BUSCAR TODOS LOS BOTONES POSIBLES
-            // Incluimos 'td' y 'span' porque a veces ScriptCase usa celdas como botones
-            const elementos = Array.from(document.querySelectorAll('a, button, input[type="button"], input[type="submit"], span.scButton_default'));
+            // 1. ESTRATEGIA DE ORO: BUSCAR POR ID EXACTO (Lo vimos en el log de ayer)
+            // 'sc_b_ins_t' = ScriptCase Button Insert Top (Botón de arriba)
+            // 'sc_b_ins_b' = ScriptCase Button Insert Bottom (Botón de abajo)
             
-            // Filtramos el que diga "agregar"
+            const btnTop = document.getElementById('sc_b_ins_t');
+            const btnBot = document.getElementById('sc_b_ins_b');
+            
+            // Si existe el de arriba, FUEGO.
+            if (btnTop) {
+                console.log("PAGE LOG: >> 🎯 ¡ENCONTRADO POR ID (Top)! Clickando #sc_b_ins_t...");
+                btnTop.style.border = "5px solid red"; // Para la foto
+                btnTop.focus();
+                btnTop.click();
+                return;
+            }
+            
+            // Si no, probamos el de abajo.
+            if (btnBot) {
+                console.log("PAGE LOG: >> 🎯 ¡ENCONTRADO POR ID (Bot)! Clickando #sc_b_ins_b...");
+                btnBot.style.border = "5px solid red";
+                btnBot.focus();
+                btnBot.click();
+                return;
+            }
+
+            // 2. ESTRATEGIA DE PLATA: BÚSQUEDA VISUAL (Respaldo)
+            const limpiar = (txt) => txt ? txt.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "") : "";
+            const elementos = Array.from(document.querySelectorAll('a, button, input[type="button"], span.scButton_default'));
+            
             const botonVisual = elementos.find(el => {
-                const texto = el.innerText || el.value || "";
-                // Verifica que diga "agregar" Y que sea visible
-                return limpiar(texto).includes("agregar") && el.offsetParent !== null;
+                const txt = el.innerText || el.value || "";
+                // Buscamos "agregar", "incluir" o "guardar"
+                const t = limpiar(txt);
+                return (t.includes("agregar") || t.includes("incluir")) && el.offsetParent !== null;
             });
 
             if (botonVisual) {
-                console.log("PAGE LOG: >> 🎯 ¡BOTÓN ENCONTRADO! ID: " + (botonVisual.id || 'Sin ID'));
-                
-                // A. PINTARLO DE ROJO (Para verlo en la foto si falla)
-                botonVisual.style.border = "5px solid red";
-                botonVisual.style.backgroundColor = "yellow";
-
-                // B. DARLE FOCO
-                botonVisual.focus();
-
-                // C. BOMBARDEO DE CLICS (3 intentos)
-                // A veces el primer clic solo "despierta" el botón
-                console.log("PAGE LOG: >> Click 1...");
-                botonVisual.click();
-                
-                // Un pequeño delay sucio usando loops (porque await sleep no va bien aquí dentro sin configs extra)
-                const start = Date.now(); while (Date.now() - start < 500); 
-
-                console.log("PAGE LOG: >> Click 2...");
+                console.log("PAGE LOG: >> ⚠️ ID falló, pero encontré texto visual. Clickando...");
+                botonVisual.style.border = "5px solid blue";
                 botonVisual.click();
             } else {
-                console.log("PAGE LOG: >> ❌ SOCORRO: No veo ningún botón que diga 'Agregar'");
-                
-                // PLAN B: INTENTO POR CÓDIGO SI FALLA LO VISUAL
-                if (typeof nm_atualiza == 'function') {
-                    console.log("PAGE LOG: >> Intentando inyección nm_atualiza('incluir')...");
-                    nm_atualiza('incluir');
-                } else if (document.F1) {
-                    console.log("PAGE LOG: >> Intentando submit F1...");
-                    if(document.F1.nmgp_opcao) document.F1.nmgp_opcao.value = 'incluir'; 
-                    document.F1.submit();
-                }
+                // 3. ESTRATEGIA DE BRONCE: INYECCIÓN JS
+                console.log("PAGE LOG: >> ❌ SOCORRO: IDs y Texto fallaron. Inyectando código...");
+                if (typeof nm_atualiza == 'function') nm_atualiza('incluir');
+                else if(document.F1) document.F1.submit();
             }
         });
         
-        // D. AYUDA EXTERNA CON TECLADO (Por si el click de JS fue bloqueado)
-        // Presionamos ENTER por si el foco quedó en el botón
-        try {
-            await page.keyboard.press('Enter');
-        } catch(e) {}
+        // 🛑 TIEMPO DE SEGURIDAD 🛑
+        // Vi en tu log que decía "Esperando 10 segundos". ES MUY POCO.
+        // Súbelo a 20 o 25 para asegurar que la foto suba.
+        console.log("⏳ Esperando 20 segundos a que procese (OBLIGATORIO)...");
+        await esperar(20000); 
 
-        console.log("⏳ Esperando 10 segundos a que procese...");
-        await esperar(10000); 
+        // ============================================================
 
         // ============================================================
 
