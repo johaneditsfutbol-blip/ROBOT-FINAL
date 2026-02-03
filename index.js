@@ -430,21 +430,24 @@ async function manipularDeudas(page, modo, idsObjetivo = []) {
 
 // --- LOGICA DE REGISTRO ---
 
+// --- LOGICA DE INICIO BLINDADA (CON DESFIBRILADOR) ---
+
 async function iniciarRegistrador() {
     if (browserRegistrador && browserRegistrador.isConnected()) return;
+    
     console.log("🚀 [RAILWAY] Iniciando Navegador Oculto...");
     try {
-        if(browserRegistrador) try{ await browserRegistrador.close(); }catch(e){}
-        
+        // 1. Limpieza preventiva
+        if(browserRegistrador) await asesinarBrowser(browserRegistrador);
+
         browserRegistrador = await puppeteer.launch({ 
-            headless: "new", // <--- OBLIGATORIO EN NUBE: "new"
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(), // <--- OBLIGATORIO EN NUBE
-            defaultViewport: { width: 1920, height: 1080 }, // Definir tamaño fijo
-            args: LAUNCH_ARGS // Usando tus argumentos optimizados
+            headless: "new", 
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
+            defaultViewport: { width: 1920, height: 1080 },
+            args: LAUNCH_ARGS 
         });
         
         pageRegistrador = await browserRegistrador.newPage();
-        // ... (resto del código de login igual)
         await pageRegistrador.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2', timeout: 60000 });
         
         if (await pageRegistrador.$(CONFIG_ICARO.selUser)) {
@@ -459,12 +462,27 @@ async function iniciarRegistrador() {
     } catch(e) {
         console.error("❌ Error iniciando Registrador:", e.message);
         browserRegistrador = null;
+
+        // ⚡ DESFIBRILADOR DE EMERGENCIA ⚡
+        if (e.message.includes('EAGAIN') || e.message.includes('unavailable') || e.message.includes('spawn')) {
+            console.log("⚠️ [CRÍTICO] Servidor saturado. EJECUTANDO PURGA DE EMERGENCIA...");
+            try { require('child_process').execSync('pkill -f chrome || true'); } catch(err){}
+            await esperar(5000); 
+        }
     }
 }
 
 async function registrarPagoWizard(idCliente, datos) {
-    if (!browserRegistrador) { console.error("❌ Registrador no listo."); return; }
+    // CAMBIO: Auto-encendido de emergencia
+    if (!browserRegistrador) { 
+        console.log("🚑 [AUTO-RECOVERY] Iniciando Registrador bajo demanda...");
+        await iniciarRegistrador();
+    }
+    
+    if (!browserRegistrador) { console.error("❌ Falló el arranque tras recuperación."); return; }
+    
     console.log(`\n🤖 --- [ICARO] PAGO ID: ${idCliente} ---`);
+    // ... (el resto del código sigue igual)
     
     const page = await browserRegistrador.newPage();
     // --- 🔥 ESTO ES NUEVO: TELEPATÍA DE LOGS 🔥 ---
@@ -759,7 +777,8 @@ async function iniciarVidanet() {
     if (browserVidanet && browserVidanet.isConnected()) return;
     console.log("🚀 [VIDANET] Iniciando...");
     try {
-        if(browserVidanet) try{ await browserVidanet.close(); }catch(e){}
+        if(browserVidanet) await asesinarBrowser(browserVidanet);
+        
         browserVidanet = await puppeteer.launch({ headless: "new", defaultViewport: null, args: LAUNCH_ARGS });
         pageVidanetDummy = await browserVidanet.newPage();
         try { await pageVidanetDummy.goto(CONFIG_VIDANET.url, { waitUntil: 'networkidle2', timeout: 60000 }); } catch(e){}
@@ -767,6 +786,13 @@ async function iniciarVidanet() {
     } catch(e) {
         console.error("❌ Error iniciando Vidanet:", e.message);
         browserVidanet = null;
+        
+        // ⚡ DESFIBRILADOR
+        if (e.message.includes('EAGAIN') || e.message.includes('unavailable')) {
+            console.log("⚠️ [CRÍTICO] Vidanet detectó saturación. PURGA DE EMERGENCIA...");
+            try { require('child_process').execSync('pkill -f chrome || true'); } catch(err){}
+            await esperar(5000);
+        }
     }
 }
 
@@ -848,7 +874,8 @@ async function iniciarServicios() {
     if (browserServicios && browserServicios.isConnected()) return;
     console.log("🚀 [SERVICIOS] Iniciando Motor...");
     try {
-        if(browserServicios) try{ await browserServicios.close(); }catch(e){}
+        if(browserServicios) await asesinarBrowser(browserServicios);
+
         browserServicios = await puppeteer.launch({ headless: "new", defaultViewport: null, args: LAUNCH_ARGS });
         pageServicios = await browserServicios.newPage();
         await pageServicios.goto(CONFIG_ICARO.urlLogin, {waitUntil:'networkidle2', timeout: 60000});
@@ -865,6 +892,13 @@ async function iniciarServicios() {
     } catch(e) {
         console.error("❌ Error iniciando Servicios:", e.message);
         browserServicios = null;
+
+        // ⚡ DESFIBRILADOR
+        if (e.message.includes('EAGAIN') || e.message.includes('unavailable')) {
+            console.log("⚠️ [CRÍTICO] Servicios detectó saturación. PURGA DE EMERGENCIA...");
+            try { require('child_process').execSync('pkill -f chrome || true'); } catch(err){}
+            await esperar(5000);
+        }
     }
 }
 
@@ -945,8 +979,16 @@ async function esperarServicios(page) {
 }
 
 async function buscarClienteServicios(idBusqueda) {
-    if (!browserServicios) throw new Error("Sistema iniciando...");
+    // CAMBIO: Auto-encendido de emergencia
+    if (!browserServicios) {
+        console.log("🚑 [AUTO-RECOVERY] Iniciando Servicios bajo demanda...");
+        await iniciarServicios();
+    }
+    
+    if (!browserServicios) throw new Error("Sistema reiniciando, intente en 10 seg...");
+    
     console.log(`🤖 [SERVICIOS] Buscando: ${idBusqueda}`);
+    // ... (el resto del código sigue igual)
     
     // --- LÓGICA ORIGINAL RESTAURADA ---
     const page = await browserServicios.newPage();
@@ -1084,7 +1126,8 @@ async function iniciarFinanzas() {
     if (browserFinanzas && browserFinanzas.isConnected()) return;
     console.log("🚀 [FINANZAS] Iniciando Motor...");
     try {
-        if(browserFinanzas) try{ await browserFinanzas.close(); }catch(e){}
+        if(browserFinanzas) await asesinarBrowser(browserFinanzas);
+
         browserFinanzas = await puppeteer.launch({ headless: "new", defaultViewport: null, args: LAUNCH_ARGS });
         pageFinanzas = await browserFinanzas.newPage();
         await pageFinanzas.goto(CONFIG_ICARO.urlLogin, { waitUntil: 'networkidle2', timeout: 60000 });
@@ -1101,6 +1144,13 @@ async function iniciarFinanzas() {
     } catch(e) {
         console.error("❌ Error iniciando Finanzas:", e.message);
         browserFinanzas = null;
+
+        // ⚡ DESFIBRILADOR
+        if (e.message.includes('EAGAIN') || e.message.includes('unavailable')) {
+            console.log("⚠️ [CRÍTICO] Finanzas detectó saturación. PURGA DE EMERGENCIA...");
+            try { require('child_process').execSync('pkill -f chrome || true'); } catch(err){}
+            await esperar(5000);
+        }
     }
 }
 
@@ -1179,8 +1229,16 @@ async function esperarYExtraerFinanzas(page, tipo, intentosMax = 5) {
 }
 
 async function buscarClienteFinanzas(idBusqueda) {
-    if(!browserFinanzas) throw new Error("Sistema iniciando...");
+    // CAMBIO: Auto-encendido de emergencia
+    if(!browserFinanzas) {
+        console.log("🚑 [AUTO-RECOVERY] Iniciando Finanzas bajo demanda...");
+        await iniciarFinanzas();
+    }
+
+    if(!browserFinanzas) throw new Error("Sistema reiniciando, intente en 10 seg...");
+    
     console.log(`🤖 [FINANZAS] Procesando: ${idBusqueda}`);
+    // ... (el resto del código sigue igual)
     const page = await browserFinanzas.newPage();
 
     try {
