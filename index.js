@@ -463,11 +463,11 @@ async function iniciarRegistrador() {
         console.error("❌ Error iniciando Registrador:", e.message);
         browserRegistrador = null;
 
-        // ⚡ DESFIBRILADOR DE EMERGENCIA ⚡
+        // 💀 PROTOCOLO KAMIKAZE (SOLUCIÓN FINAL) 💀
+        // Si no hay recursos, nos suicidamos para que Railway nos reviva limpio en 2s.
         if (e.message.includes('EAGAIN') || e.message.includes('unavailable') || e.message.includes('spawn')) {
-            console.log("⚠️ [CRÍTICO] Servidor saturado. EJECUTANDO PURGA DE EMERGENCIA...");
-            try { require('child_process').execSync('pkill -f chrome || true'); } catch(err){}
-            await esperar(5000); 
+            console.log("💀 [FATAL] LÍMITE ALCANZADO. REINICIO DE CONTENEDOR...");
+            process.exit(1); 
         }
     }
 }
@@ -787,11 +787,10 @@ async function iniciarVidanet() {
         console.error("❌ Error iniciando Vidanet:", e.message);
         browserVidanet = null;
         
-        // ⚡ DESFIBRILADOR
+        // 💀 PROTOCOLO KAMIKAZE
         if (e.message.includes('EAGAIN') || e.message.includes('unavailable')) {
-            console.log("⚠️ [CRÍTICO] Vidanet detectó saturación. PURGA DE EMERGENCIA...");
-            try { require('child_process').execSync('pkill -f chrome || true'); } catch(err){}
-            await esperar(5000);
+            console.log("💀 [FATAL] VIDANET COLAPSÓ. REINICIO DE CONTENEDOR...");
+            process.exit(1);
         }
     }
 }
@@ -893,11 +892,10 @@ async function iniciarServicios() {
         console.error("❌ Error iniciando Servicios:", e.message);
         browserServicios = null;
 
-        // ⚡ DESFIBRILADOR
+        // 💀 PROTOCOLO KAMIKAZE
         if (e.message.includes('EAGAIN') || e.message.includes('unavailable')) {
-            console.log("⚠️ [CRÍTICO] Servicios detectó saturación. PURGA DE EMERGENCIA...");
-            try { require('child_process').execSync('pkill -f chrome || true'); } catch(err){}
-            await esperar(5000);
+            console.log("💀 [FATAL] SERVICIOS COLAPSÓ. REINICIO DE CONTENEDOR...");
+            process.exit(1);
         }
     }
 }
@@ -1145,11 +1143,10 @@ async function iniciarFinanzas() {
         console.error("❌ Error iniciando Finanzas:", e.message);
         browserFinanzas = null;
 
-        // ⚡ DESFIBRILADOR
+        // 💀 PROTOCOLO KAMIKAZE
         if (e.message.includes('EAGAIN') || e.message.includes('unavailable')) {
-            console.log("⚠️ [CRÍTICO] Finanzas detectó saturación. PURGA DE EMERGENCIA...");
-            try { require('child_process').execSync('pkill -f chrome || true'); } catch(err){}
-            await esperar(5000);
+            console.log("💀 [FATAL] FINANZAS COLAPSÓ. REINICIO DE CONTENEDOR...");
+            process.exit(1);
         }
     }
 }
