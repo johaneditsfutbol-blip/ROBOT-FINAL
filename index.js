@@ -6,6 +6,23 @@ const fs = require('fs');
 const https = require('https');
 const path = require('path');
 
+// ==============================================================================
+// 1. CONFIGURACIONES GLOBALES (ACTUALIZADO PARA VARIABLES DE ENTORNO)
+// ==============================================================================
+
+const CONFIG_ICARO = {
+    urlLogin: "https://administrativo.icarosoft.com/",
+    urlLista: "https://administrativo.icarosoft.com/Listado_clientes_tickets/",
+    
+    // ⬇️ AQUÍ ESTÁ EL CAMBIO DIABÓLICO ⬇️
+    // Le decimos: "Usa lo que diga Railway, y si no hay nada, usa JOHANC por defecto"
+    user: process.env.ICARO_USER || "JOHANC", 
+    pass: process.env.ICARO_PASS || "@VNjohanc16",
+    
+    selUser: '#id_sc_field_login',
+    selPass: '#id_sc_field_pswd',
+};
+
 // --- INSPECTOR DE IP (Para Whitelist) ---
 function mostrarMiIP() {
     console.log("🕵️ Buscando IP del Servidor...");
@@ -22,23 +39,20 @@ function mostrarMiIP() {
 mostrarMiIP();
 // ----------------------------------------
 
+// --- VERIFICADOR DE IDENTIDAD DEL OBRERO ---
+console.log("\n========================================");
+console.log("🤖 IDENTIDAD DEL ROBOT:");
+console.log("👤 USUARIO CONFIGURADO: " + CONFIG_ICARO.user);
+// No imprimimos la clave por seguridad, solo si existe
+console.log("🔑 CLAVE CARGADA: " + (CONFIG_ICARO.pass ? "SÍ (Protegida)" : "NO"));
+console.log("========================================\n");
+
 const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(express.json());
 
-// ==============================================================================
-// 1. CONFIGURACIONES GLOBALES
-// ==============================================================================
-
-const CONFIG_ICARO = {
-    urlLogin: "https://administrativo.icarosoft.com/",
-    urlLista: "https://administrativo.icarosoft.com/Listado_clientes_tickets/",
-    user: "JOHANC",
-    pass: "@VNjohanc16",
-    selUser: '#id_sc_field_login',
-    selPass: '#id_sc_field_pswd',
-};
+// ----------------------------------------
 
 const CONFIG_VIDANET = { 
     url: "https://pagos.vidanet.net" 
