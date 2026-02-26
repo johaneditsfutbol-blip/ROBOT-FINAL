@@ -1399,6 +1399,29 @@ app.get('/buscar-finanzas', async (req, res) => {
     } catch (error) { res.status(500).json({ success: false, error: error.message }); }
 });
 
+// --- 🔥 NUEVO: PROTOCOLO DE AUTODESTRUCCIÓN (ORDEN 66) 🔥 ---
+app.post('/orden-66', (req, res) => {
+    // Verificamos que la orden venga del Comandante (Cambia esta clave en producción)
+    const llaveSecreta = req.headers['x-comandante-secret'];
+    
+    if (llaveSecreta === 'IcaroSoft_Destruccion_Inminente_2026') {
+        console.log("💀 [CRÍTICO] Orden de reinicio recibida del Comandante.");
+        
+        // Respondemos rápido para liberar al Comandante
+        res.status(200).json({ message: "Iniciando secuencia de autodestrucción. Reiniciando contenedor en Railway..." });
+        
+        // Retrasamos el suicidio 1 segundo para asegurar que la respuesta HTTP salió
+        setTimeout(() => {
+            console.log("💥 Ejecutando process.exit(1) a petición del Comandante...");
+            process.exit(1); 
+        }, 1000);
+    } else {
+        // Alguien intentó adivinar la ruta. Lo ignoramos.
+        console.log("🛡️ [SEGURIDAD] Intento de acceso denegado a /orden-66.");
+        res.status(403).json({ error: "Acceso denegado" });
+    }
+});
+
 // --- RUTA DE SALUD (Vital para que Railway sepa si el server vive) ---
 app.get('/health', (req, res) => {
     // Si podemos responder esto, es que el event loop de Node funciona
