@@ -285,6 +285,21 @@ async function seleccionarLetra(page, letra) {
     }, letra);
 }
 
+// --- NUEVO: RADIO DE REPORTE AL COMANDANTE ---
+async function reportarMisionAlComandante(webhookUrl, reqId, exito, mensaje, sistema) {
+    if (!webhookUrl || !reqId) return; // Si es una prueba manual directa, no hace nada
+    try {
+        console.log(`   📡 [RADIO] Reportando al Comandante: REQ[${reqId}] | Éxito: ${exito}`);
+        await fetch(webhookUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ reqId, exito, mensaje, sistema })
+        });
+    } catch (e) {
+        console.error(`   ❌ [RADIO] Falló la comunicación con el Comandante:`, e.message);
+    }
+}
+
 // ==============================================================================
 // 3. MÓDULO ROBOT 1: REGISTRADOR DE PAGOS (ICARO + VIDANET)
 // ==============================================================================
@@ -486,14 +501,18 @@ async function iniciarRegistrador() {
     }
 }
 
-async function registrarPagoWizard(idCliente, datos) {
+async function registrarPagoWizard(idCliente, datos, reqId, webhookUrl) {
     // CAMBIO: Auto-encendido de emergencia
     if (!browserRegistrador) { 
         console.log("🚑 [AUTO-RECOVERY] Iniciando Registrador bajo demanda...");
         await iniciarRegistrador();
     }
     
-    if (!browserRegistrador) { console.error("❌ Falló el arranque tras recuperación."); return; }
+    if (!browserRegistrador) { 
+        console.error("❌ Falló el arranque tras recuperación."); 
+        await reportarMisionAlComandante(webhookUrl, reqId, false, "Fallo al arrancar navegador", "ICAROSOFT");
+        return; 
+    }
     
     console.log(`\n🤖 --- [ICARO] PAGO ID: ${idCliente} ---`);
     // ... (el resto del código sigue igual)
@@ -573,6 +592,7 @@ async function registrarPagoWizard(idCliente, datos) {
             console.error(errorMsg);
             await notificarBuilderBot({ numero: datos.numero, mensaje: errorMsg });
             await gestionarNotificacionPush(idCliente, datos, false, "La dirección del servicio no coincide.");
+            await reportarMisionAlComandante(webhookUrl, reqId, false, errorMsg, "ICAROSOFT");
             await page.close();
             return;
         }
@@ -778,11 +798,13 @@ async function registrarPagoWizard(idCliente, datos) {
         // Notificaciones
         await notificarBuilderBot(datos);
         await gestionarNotificacionPush(idCliente, datos, true);
+        await reportarMisionAlComandante(webhookUrl, reqId, true, "Pago procesado y capturado", "ICAROSOFT");
 
     } catch(e) {
         console.error("❌ ERROR EN SEGUNDO PLANO ICARO:", e.message);
         await notificarBuilderBot({ numero: datos.numero, mensaje: `Error técnico: ${e.message}` });
         await gestionarNotificacionPush(idCliente, datos, false, "Ocurrió un error técnico al registrar.");
+        await reportarMisionAlComandante(webhookUrl, reqId, false, e.message, "ICAROSOFT");
         if(page && !page.isClosed()) await page.close();
     }
 }
@@ -809,7 +831,7 @@ async function iniciarVidanet() {
     }
 }
 
-async function procesarPagoVidanet(datos) {
+async function procesarPagoVidanet(datos, reqId, webhookUrl) {
     if(!browserVidanet) await iniciarVidanet();
     console.log(`\n🤖 --- [VIDANET] PAGO REF: ${datos.referencia} ---`);
     const page = await browserVidanet.newPage();
@@ -870,11 +892,13 @@ async function procesarPagoVidanet(datos) {
         await page.close();
         await notificarBuilderBot({numero:datos.numero, mensaje:resultado});
         await gestionarNotificacionPush(datos.cedula, datos, esExito, resultado);
+        await reportarMisionAlComandante(webhookUrl, reqId, esExito, resultado, "VIDANET");
 
     } catch(e) {
         console.error("❌ ERROR VIDANET:", e.message);
         await notificarBuilderBot({numero:datos.numero, mensaje:`Error Vidanet: ${e.message}`});
         await gestionarNotificacionPush(datos.cedula, datos, false, e.message);
+        await reportarMisionAlComandante(webhookUrl, reqId, false, e.message, "VIDANET");
         if(page) await page.close();
     }
 }
@@ -1306,20 +1330,20 @@ async function buscarClienteFinanzas(idBusqueda) {
 
 // 1. REGISTRAR PAGO ICARO
 app.post('/pagar', (req, res) => {
-    const { id, datos } = req.body;
+    const { id, datos, reqId, webhookUrl } = req.body;
     if (!id || !datos) return res.status(400).json({ error: "Faltan datos" });
-    console.log(`\n📨 Solicitud ICARO recibida ID: ${id}.`);
+    console.log(`\n📨 Solicitud ICARO recibida ID: ${id}. [REQ: ${reqId || 'N/A'}]`);
     res.json({ status: "OK", message: "Procesando Icaro..." });
-    registrarPagoWizard(id, datos);
+    registrarPagoWizard(id, datos, reqId, webhookUrl);
 });
 
 // 2. REGISTRAR PAGO VIDANET
 app.post('/pagar-vidanet', (req, res) => {
-    const { datos } = req.body;
+    const { datos, reqId, webhookUrl } = req.body;
     if (!datos) return res.status(400).json({ error: "Faltan datos" });
-    console.log(`\n📨 Solicitud VIDANET recibida.`);
+    console.log(`\n📨 Solicitud VIDANET recibida. [REQ: ${reqId || 'N/A'}]`);
     res.json({ status: "OK", message: "Procesando Vidanet..." });
-    procesarPagoVidanet(datos);
+    procesarPagoVidanet(datos, reqId, webhookUrl);
 });
 
 // 3. CONSULTAR DEUDAS VIDANET (GET)
