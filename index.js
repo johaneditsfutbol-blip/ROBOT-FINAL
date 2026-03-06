@@ -147,8 +147,22 @@ async function gestionarNotificacionPush(idCliente, datos, esExito, mensajeDetal
     try {
         console.log(`   📱 [PUSH MULTI-DEVICE] Procesando para ID entrada: ${idCliente}`);
         
-        // 1. BUSCAR TODOS LOS TOKENS ASOCIADOS
-        const urlGet = `${PUSH_CONFIG.supabaseUrl}?codigo_cliente=ilike.*${idCliente}*&select=expo_push_token,codigo_cliente`;
+        // 1. BUSCAR TODOS LOS TOKENS ASOCIADOS (Modo Francotirador Multi-Calibre)
+        
+        // Extraemos solo los números puros enviados por el bot/app.
+        const idLimpio = String(idCliente).replace(/\D/g, '');
+
+        // 🛑 SEGURO DEL GATILLO: Si el ID es basura (ej. vacío o un "1"), abortamos para evitar masacres.
+        if (idLimpio.length < 5) {
+            console.log(`   ⚠️ [PUSH CANCELADO] ID inválido o muy corto para notificar: '${idCliente}'`);
+            return;
+        }
+
+        // 🎯 Creamos todas las combinaciones exactas posibles (V, J, E, G, con guion y sin guion)
+        const posiblesIDs = `V${idLimpio},J${idLimpio},E${idLimpio},G${idLimpio},V-${idLimpio},${idLimpio}`;
+        
+        // Usamos 'in.' (Debe ser exactamente igual a uno de los elementos de la lista)
+        const urlGet = `${PUSH_CONFIG.supabaseUrl}?codigo_cliente=in.(${posiblesIDs})&select=expo_push_token,codigo_cliente`;
         
         const respSupabase = await fetch(urlGet, {
             method: 'GET',
