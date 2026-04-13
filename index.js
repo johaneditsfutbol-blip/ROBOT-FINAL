@@ -295,31 +295,30 @@ async function seleccionarLetra(page, letra) {
 
 // --- NUEVO: TRANSMISOR DE TELEMETRÍA (LOGS EN TIEMPO REAL) ---
 async function reportarLog(tipo, mensaje, reqId = 'SYS', duracion = null) {
-    // ⚠️ Asegúrate de no dejar una barra (/) al final de tu URL aquí ⚠️
     const urlComandante = process.env.URL_COMANDANTE || "https://robot-final-production.up.railway.app"; 
     const apiKey = process.env.API_SECRET_TOKEN || "eJVIDANEThyhealkxyydhakjhsndu"; 
-    const idObrero = process.env.WORKER_ID ? `WK_0${process.env.WORKER_ID}` : 'WK_??'; 
+    // 🔥 FIX: Solo mandamos el número, el Dashboard le pone el "WK_"
+    const idObrero = process.env.WORKER_ID || '?'; 
     
     try {
         await fetch(`${urlComandante}/api/tactico/log-externo`, {
             method: 'POST',
-            headers: { 
-                'Content-Type': 'application/json',
-                'x-api-key': apiKey 
-            },
-            body: JSON.stringify({
-                reqId, 
-                tipo, 
-                mensaje, 
-                idOrigen: idObrero, 
-                duracion
-            })
+            headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+            body: JSON.stringify({ reqId, tipo, mensaje, idOrigen: idObrero, duracion })
         });
-    } catch (e) { 
-        // Ahora sí nos enteraremos si la radio está rota
-        console.error("❌ [TELEMETRÍA ERROR] No se pudo conectar con el Distribuidor:", e.message); 
-    }
+    } catch (e) {}
 }
+
+// 🔥 INTERCEPTOR GLOBAL: Clona todo lo que pase en el Obrero hacia el Dashboard 🔥
+const logOriginal = console.log;
+console.log = function(...args) {
+    logOriginal.apply(console, args); // Lo mantiene visible en Railway
+    const mensaje = args.join(' ').replace(/\n/g, '').trim();
+    // Filtramos para no hacer un bucle infinito con los propios logs de radio
+    if(mensaje && !mensaje.includes('[RADIO]') && !mensaje.includes('TELEMETRÍA')) {
+        reportarLog('INFO', mensaje);
+    }
+};
 
 // --- NUEVO: RADIO DE REPORTE AL COMANDANTE ---
 async function reportarMisionAlComandante(webhookUrl, reqId, exito, mensaje, sistema) {
