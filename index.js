@@ -295,19 +295,30 @@ async function seleccionarLetra(page, letra) {
 
 // --- NUEVO: TRANSMISOR DE TELEMETRÍA (LOGS EN TIEMPO REAL) ---
 async function reportarLog(tipo, mensaje, reqId = 'SYS', duracion = null) {
-    // ⚠️ REEMPLAZA ESTA URL POR LA DE TU DISTRIBUIDOR REAL ⚠️
-    const urlComandante = process.env.URL_COMANDANTE || "https://robot-final-production.up.railway.app/"; 
-    const apiKey = process.env.API_SECRET_TOKEN || "eJVIDANEThyhealkxyydhakjhsndu"; // Pon tu API KEY real aquí
+    // ⚠️ Asegúrate de no dejar una barra (/) al final de tu URL aquí ⚠️
+    const urlComandante = process.env.URL_COMANDANTE || "https://robot-final-production.up.railway.app"; 
+    const apiKey = process.env.API_SECRET_TOKEN || "eJVIDANEThyhealkxyydhakjhsndu"; 
     const idObrero = process.env.WORKER_ID ? `WK_0${process.env.WORKER_ID}` : 'WK_??'; 
     
     try {
-        await axios.post(`${urlComandante}/api/tactico/log-externo`, {
-            reqId, tipo, mensaje, idOrigen: idObrero, duracion
-        }, {
-            headers: { 'x-api-key': apiKey },
-            timeout: 3000
+        await fetch(`${urlComandante}/api/tactico/log-externo`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'x-api-key': apiKey 
+            },
+            body: JSON.stringify({
+                reqId, 
+                tipo, 
+                mensaje, 
+                idOrigen: idObrero, 
+                duracion
+            })
         });
-    } catch (e) { /* Falla silenciosa para no estorbar al obrero */ }
+    } catch (e) { 
+        // Ahora sí nos enteraremos si la radio está rota
+        console.error("❌ [TELEMETRÍA ERROR] No se pudo conectar con el Distribuidor:", e.message); 
+    }
 }
 
 // --- NUEVO: RADIO DE REPORTE AL COMANDANTE ---
