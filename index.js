@@ -293,6 +293,23 @@ async function seleccionarLetra(page, letra) {
     }, letra);
 }
 
+// --- NUEVO: TRANSMISOR DE TELEMETRÍA (LOGS EN TIEMPO REAL) ---
+async function reportarLog(tipo, mensaje, reqId = 'SYS', duracion = null) {
+    // ⚠️ REEMPLAZA ESTA URL POR LA DE TU DISTRIBUIDOR REAL ⚠️
+    const urlComandante = process.env.URL_COMANDANTE || "https://robot-final-production.up.railway.app/"; 
+    const apiKey = process.env.API_SECRET_TOKEN || "eJVIDANEThyhealkxyydhakjhsndu"; // Pon tu API KEY real aquí
+    const idObrero = process.env.WORKER_ID ? `WK_0${process.env.WORKER_ID}` : 'WK_??'; 
+    
+    try {
+        await axios.post(`${urlComandante}/api/tactico/log-externo`, {
+            reqId, tipo, mensaje, idOrigen: idObrero, duracion
+        }, {
+            headers: { 'x-api-key': apiKey },
+            timeout: 3000
+        });
+    } catch (e) { /* Falla silenciosa para no estorbar al obrero */ }
+}
+
 // --- NUEVO: RADIO DE REPORTE AL COMANDANTE ---
 async function reportarMisionAlComandante(webhookUrl, reqId, exito, mensaje, sistema) {
     if (!webhookUrl || !reqId) return; // Si es una prueba manual directa, no hace nada
@@ -523,9 +540,10 @@ async function registrarPagoWizard(idCliente, datos, reqId, webhookUrl) {
     }
     
     console.log(`\n🤖 --- [ICARO] PAGO ID: ${idCliente} ---`);
-    // ... (el resto del código sigue igual)
-    
-    const page = await browserRegistrador.newPage();
+    reportarLog('INFO', 'Iniciando navegación en Icarosoft...', reqId);
+    // ... (el resto del código sigue igual)
+    
+    const page = await browserRegistrador.newPage();
     // --- 🔥 ESTO ES NUEVO: TELEPATÍA DE LOGS 🔥 ---
     // Nos permite ver qué está pasando DENTRO de la página web
     page.on('console', msg => console.log('PAGE LOG:', msg.text()));
@@ -805,16 +823,18 @@ async function registrarPagoWizard(idCliente, datos, reqId, webhookUrl) {
 
         // Notificaciones
         await notificarBuilderBot(datos);
-        await gestionarNotificacionPush(idCliente, datos, true);
-        await reportarMisionAlComandante(webhookUrl, reqId, true, "Pago procesado y capturado", "ICAROSOFT");
+        await gestionarNotificacionPush(idCliente, datos, true);
+        reportarLog('EXITO', 'Captura finalizada en Icarosoft.', reqId);
+        await reportarMisionAlComandante(webhookUrl, reqId, true, "Pago procesado y capturado", "ICAROSOFT");
 
-    } catch(e) {
-        console.error("❌ ERROR EN SEGUNDO PLANO ICARO:", e.message);
-        await notificarBuilderBot({ numero: datos.numero, mensaje: `Error técnico: ${e.message}` });
-        await gestionarNotificacionPush(idCliente, datos, false, "Ocurrió un error técnico al registrar.");
-        await reportarMisionAlComandante(webhookUrl, reqId, false, e.message, "ICAROSOFT");
-        if(page && !page.isClosed()) await page.close();
-    }
+    } catch(e) {
+        console.error("❌ ERROR EN SEGUNDO PLANO ICARO:", e.message);
+        reportarLog('ERROR', `Fallo en Icaro: ${e.message}`, reqId);
+        await notificarBuilderBot({ numero: datos.numero, mensaje: `Error técnico: ${e.message}` });
+        await gestionarNotificacionPush(idCliente, datos, false, "Ocurrió un error técnico al registrar.");
+        await reportarMisionAlComandante(webhookUrl, reqId, false, e.message, "ICAROSOFT");
+        if(page && !page.isClosed()) await page.close();
+    }
 }
 
 async function iniciarVidanet() {
@@ -840,9 +860,10 @@ async function iniciarVidanet() {
 }
 
 async function procesarPagoVidanet(datos, reqId, webhookUrl) {
-    if(!browserVidanet) await iniciarVidanet();
-    console.log(`\n🤖 --- [VIDANET] PAGO REF: ${datos.referencia} ---`);
-    const page = await browserVidanet.newPage();
+    if(!browserVidanet) await iniciarVidanet();
+    console.log(`\n🤖 --- [VIDANET] PAGO REF: ${datos.referencia} ---`);
+    reportarLog('INFO', 'Iniciando navegación en Vidanet...', reqId);
+    const page = await browserVidanet.newPage();
     page.setDefaultNavigationTimeout(60000);
     let resultado = "", esExito = false;
 
@@ -898,17 +919,19 @@ async function procesarPagoVidanet(datos, reqId, webhookUrl) {
         }
 
         await page.close();
-        await notificarBuilderBot({numero:datos.numero, mensaje:resultado});
-        await gestionarNotificacionPush(datos.cedula, datos, esExito, resultado);
-        await reportarMisionAlComandante(webhookUrl, reqId, esExito, resultado, "VIDANET");
+        reportarLog(esExito ? 'EXITO' : 'ALERTA', `Vidanet: ${resultado}`, reqId);
+        await notificarBuilderBot({numero:datos.numero, mensaje:resultado});
+        await gestionarNotificacionPush(datos.cedula, datos, esExito, resultado);
+        await reportarMisionAlComandante(webhookUrl, reqId, esExito, resultado, "VIDANET");
 
-    } catch(e) {
-        console.error("❌ ERROR VIDANET:", e.message);
-        await notificarBuilderBot({numero:datos.numero, mensaje:`Error Vidanet: ${e.message}`});
-        await gestionarNotificacionPush(datos.cedula, datos, false, e.message);
-        await reportarMisionAlComandante(webhookUrl, reqId, false, e.message, "VIDANET");
-        if(page) await page.close();
-    }
+    } catch(e) {
+        console.error("❌ ERROR VIDANET:", e.message);
+        reportarLog('ERROR', `Fallo en Vidanet: ${e.message}`, reqId);
+        await notificarBuilderBot({numero:datos.numero, mensaje:`Error Vidanet: ${e.message}`});
+        await gestionarNotificacionPush(datos.cedula, datos, false, e.message);
+        await reportarMisionAlComandante(webhookUrl, reqId, false, e.message, "VIDANET");
+        if(page) await page.close();
+    }
 }
 
 // ==============================================================================
